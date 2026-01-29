@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command:*)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\Prateek\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Prateek-OneDrive-Desktop-Claude-Projects-Invest-me\\\\633dad8c-7ec7-41ac-bbae-d937f11f7583\\\\scratchpad\\\\stitch_prototype\")",
+      "Bash(for dir in models schemas api api/v1 services tasks utils)",
+      "Bash(do touch \"C:/Users/Prateek/OneDrive/Desktop/Claude Projects/Invest.me/backend/app/$dir/__init__.py\")",
+      "Bash(done)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(node --version:*)",
+      "Bash(npm:*)",
+      "Bash(start \"\" \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\")",
+      "Bash(start \"\" \"C:\\\\Program Files \\(x86\\)\\\\Docker\\\\Docker\\\\Docker Desktop.exe\")",
+      "Bash(curl:*)",
+      "Bash(dir:*)",
+      "Bash(tree:*)",
+      "Bash(npx next build:*)",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "Bash(ls:*)",
+      "Bash(npx tsc:*)",
+      "Bash(taskkill:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
