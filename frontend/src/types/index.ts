@@ -112,3 +112,25 @@ export interface CsvPreviewRow {
   asset_class_code: string;
   [key: string]: string | number;
 }
+
+export interface ImportRow {
+  symbol: string;
+  name: string;
+  quantity: number;
+  avg_buy_price: number;
+  asset_class_code: string;
+  exchange?: string;
+  buy_currency: string;
+}
+
+export interface CsvUploadResult {
+  rows: ImportRow[];
+  count: number;
+  detected_broker: string | null;
+  confidence: number;
+  headers: string[] | null;
+}
+
+export interface ColumnMapping {
+  [ourField: string]: string;
+}
