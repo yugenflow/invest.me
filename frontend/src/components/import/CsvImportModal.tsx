@@ -19,6 +19,7 @@ const STEPS = ["Upload", "Review", "Confirm"];
 
 const BROKER_OPTIONS = [
   { value: "", label: "Auto-detect (recommended)" },
+  { value: "kotak", label: "Kotak Neo" },
   { value: "upstox", label: "Upstox" },
   { value: "zerodha", label: "Zerodha" },
 ];
@@ -39,6 +40,7 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
   const [done, setDone] = useState(false);
   const [showFormatHelp, setShowFormatHelp] = useState(false);
+  const [parseError, setParseError] = useState(false);
 
   const { uploadCsv, confirmImport, uploading, confirming } = useImport();
 
@@ -53,6 +55,7 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
     setColumnMapping({});
     setDone(false);
     setShowFormatHelp(false);
+    setParseError(false);
   };
 
   const handleClose = () => {
@@ -67,6 +70,7 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
       const result = await uploadCsv(f, mapping, broker || undefined);
       setDetectedBroker(result.detected_broker);
 
+      setParseError(false);
       if (result.rows.length > 0) {
         setRows(result.rows);
         setShowMapper(false);
@@ -79,9 +83,11 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
         setCsvHeaders(result.headers);
         setShowMapper(true);
       } else {
-        toast.error("No valid data found in CSV");
+        setParseError(true);
+        toast.error("Could not recognize the file format");
       }
     } catch (err: any) {
+      setParseError(true);
       toast.error(err.response?.data?.detail || "Upload failed");
     }
   };
@@ -190,7 +196,8 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
                     </table>
                   </div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
-                    LTP, current value, P&amp;L, and other columns are ignored &mdash; we derive them from live market data. Extra rows at the top (summaries, blank lines) are skipped automatically.
+                    We auto-detect exports from <strong>Zerodha</strong>, <strong>Upstox</strong>, <strong>Kotak Neo</strong>, and most standard broker formats.
+                    LTP, current value, P&amp;L, and other columns are ignored &mdash; we derive them from live market data. Summary rows and blank lines are skipped automatically.
                   </p>
                 </div>
               )}
@@ -209,6 +216,27 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
                 <Button size="lg" onClick={() => handleUpload()} loading={uploading}>
                   Upload & Parse
                 </Button>
+              )}
+
+              {parseError && (
+                <div className="rounded-card border border-alert-red/30 bg-alert-red/5 p-5 space-y-3">
+                  <p className="text-sm font-semibold text-alert-red">
+                    We couldn&apos;t recognize the format of your file.
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    Try one of these:
+                  </p>
+                  <ul className="text-sm text-gray-600 dark:text-gray-300 list-disc list-inside space-y-1">
+                    <li>Select your broker from the dropdown above and re-upload</li>
+                    <li>Make sure your CSV has columns for <strong>Symbol/Name</strong>, <strong>Quantity</strong>, and <strong>Avg. Price</strong></li>
+                    <li>Remove any extra header rows, footers, or summary lines from the file</li>
+                    <li>Save the file as CSV (not Excel .xlsx) with UTF-8 encoding</li>
+                  </ul>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                    We support exports from Zerodha, Upstox, Kotak Neo, and most brokers.
+                    If your format still isn&apos;t recognized, use the column mapper that appears automatically, or try Manual Entry instead.
+                  </p>
+                </div>
               )}
             </div>
           )}

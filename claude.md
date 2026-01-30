@@ -1,0 +1,169 @@
+# Invest.me — Claude Session Context
+
+> This file is read at the start of every Claude Code session.
+> Keep it updated after every significant change.
+
+**Last updated:** 2026-01-30
+
+---
+
+## Project Summary
+
+Invest.me is a full-stack investment portfolio management platform for Indian retail investors. Users can track holdings across asset classes, import from brokers, view analytics, and (soon) get AI-powered advice.
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Frontend | Next.js (App Router, Turbopack) | 15.1.0 |
+| UI | React + TypeScript | 19.0.0 |
+| Styling | Tailwind CSS (class-based dark mode) | 3.4.17 |
+| State | Zustand | 5.0.2 |
+| Charts | Recharts | 2.15.0 |
+| Icons | Lucide React | 0.468.0 |
+| Toasts | react-hot-toast | 2.4.1 |
+| Backend | FastAPI + Uvicorn | 0.115.6 |
+| ORM | SQLAlchemy (async) + Asyncpg | 2.0.36 |
+| Database | PostgreSQL 16 | — |
+| Cache | Redis 7 | — |
+| Auth | JWT (python-jose) + Bcrypt | — |
+| Tasks | Celery | 5.4.0 |
+| Migrations | Alembic | 1.14.0 |
+| Infra | Docker Compose | — |
+
+---
+
+## Directory Layout
+
+```
+Invest.me/
+├── frontend/src/
+│   ├── app/
+│   │   ├── (auth)/          login, signup
+│   │   ├── (onboarding)/    risk-profile wizard
+│   │   ├── (dashboard)/     all protected pages (layout has Sidebar + TopBar)
+│   │   │   ├── dashboard/   portfolio overview       ✅
+│   │   │   ├── import/      CSV & manual import      ✅
+│   │   │   ├── advisor/     Smart Advisor             🔜
+│   │   │   ├── market-intel/                          🔜
+│   │   │   ├── rebalance/                             🔜
+│   │   │   ├── sentiment/                             🔜
+│   │   │   ├── expert-opinion/                        🔜
+│   │   │   ├── new-avenues/                           🔜
+│   │   │   ├── subscription/ 3-tier pricing page      ✅
+│   │   │   └── settings/    profile & password        ✅
+│   │   └── (public)         about, services, solutions, community
+│   ├── components/
+│   │   ├── ui/              Button, Card, Input, Select, Modal, ComingSoon
+│   │   ├── layout/          Sidebar, TopBar, Navbar, Footer, ThemeProvider
+│   │   ├── dashboard/       NetWorthCard, StatCard, TopMoverCard, TopHoldings, HoldingsTable
+│   │   ├── charts/          PerformanceChart, DonutChart
+│   │   ├── portfolio/       HoldingForm
+│   │   ├── import/          CsvImportModal, ManualEntryModal, DropZone, ColumnMapper, etc.
+│   │   └── onboarding/      ProgressBar
+│   ├── hooks/               useDashboard, usePortfolio, useImport
+│   ├── lib/                 api.ts (axios + JWT interceptors), utils.ts (cn, formatCurrency, etc.)
+│   ├── stores/              authStore.ts (Zustand — tokens, user, logout)
+│   └── types/               index.ts (UserProfile, Holding, Transaction, etc.)
+│
+├── backend/
+│   ├── app/
+│   │   ├── routes/          auth, users, onboarding, holdings, transactions, asset_classes, portfolio, dashboard, import
+│   │   ├── models/          User, RiskProfile, Holding, Transaction, Goal, AssetClass, Signal, etc.
+│   │   ├── services/        auth_service, portfolio_service, risk_engine, csv_parser
+│   │   ├── config.py        Pydantic Settings
+│   │   ├── database.py      async engine + session
+│   │   └── redis.py         async Redis client
+│   └── tests/               test_auth, test_onboarding, test_holdings, test_portfolio, test_csv_import
+│
+├── alembic/                 DB migrations
+├── scripts/                 seed_asset_classes.py
+├── docker-compose.yml       db, redis, backend, celery-worker, frontend
+├── claude.md                ← this file
+└── DOCUMENTATION.md         full project docs for humans & external tools
+```
+
+---
+
+## Design System Quick Reference
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `brand-lime` | #D4F358 | Primary accent, CTAs, active states |
+| `brand-black` | #0F172A | Text on lime backgrounds |
+| `navy-900` | #051019 | Darkest background |
+| `navy-800` | #0B1C2E | Card background (dark mode) |
+| `navy-700` | #15283D | Borders (dark mode) |
+| `alert-red` | #FF3B30 | Errors, losses |
+| `gain` | #4d7c0f | Positive returns |
+| `rounded-card` | 14px | Card border radius |
+| Font | Plus Jakarta Sans | 400–700 weights |
+
+**Component conventions:**
+- `Button` — variants: primary / secondary / outline / ghost / danger; sizes: sm / md / lg
+- `Card` — optional `glass` prop for frosted look; default has border + `rounded-card`
+- Dark mode via `dark:` Tailwind classes throughout
+
+---
+
+## API Base
+
+- Frontend env: `NEXT_PUBLIC_API_URL=http://localhost:8000`
+- All API calls go through `frontend/src/lib/api.ts` → `{API_URL}/api/v1/*`
+- JWT access token added via Axios request interceptor
+- 401 responses trigger silent token refresh
+
+---
+
+## Auth Flow
+
+1. Signup → creates user → redirect to `/onboarding`
+2. Login → JWT access (15 min) + refresh (7 day, HttpOnly cookie) → Zustand stores token
+3. Onboarding incomplete → redirect to `/onboarding`
+4. Token refresh handled by Axios interceptor on 401
+5. Logout → blacklist refresh token in Redis → clear Zustand → redirect `/login`
+
+---
+
+## Feature Status
+
+| Feature | Frontend | Backend | Notes |
+|---------|----------|---------|-------|
+| Auth (login/signup/logout) | ✅ | ✅ | JWT + refresh rotation |
+| Onboarding (risk profile) | ✅ | ✅ | 4-step wizard, weighted risk scoring |
+| Dashboard | ✅ | ✅ | Summary, allocation chart, performance chart, holdings table |
+| Holdings CRUD | ✅ | ✅ | Add/edit/delete, auto-creates buy transaction |
+| CSV Import | ✅ | ✅ | Broker detection (Zerodha, Upstox, Kotak Neo + fuzzy fallback), column mapping, preview, confirm |
+| Manual Entry | ✅ | ✅ | Spreadsheet-style modal |
+| Settings | ✅ | ✅ | Profile update, password change |
+| Subscription | ✅ | — | 3-tier pricing UI, no payment backend yet |
+| Smart Advisor | 🔜 | 🔜 | AI-powered recommendations |
+| Market Intel | 🔜 | 🔜 | News, analysis, sector insights |
+| Rebalance | 🔜 | 🔜 | AI portfolio rebalancing suggestions |
+| Sentiment Index | 🔜 | 🔜 | Real-time market sentiment |
+| Expert Opinion | 🔜 | 🔜 | Curated expert insights |
+| New Avenues | 🔜 | 🔜 | IPOs, new funds, alt investments |
+| Live Market Data | — | 🔜 | Currently mock data; no live pricing yet |
+
+---
+
+## Current Session / Recent Changes
+
+- **2026-01-30:** Built subscription page (`/subscription`) — 3-tier pricing (Basic ₹499, Pro ₹1,299, Premium ₹7,499), monthly/annual toggle, feature comparison, FAQ accordion. Pro card highlighted with lime border + "Most Popular" badge. Centered headings/prices, equal-height side cards.
+- **2026-01-30:** Added Kotak Neo CSV parser support. Added broker signature detection for Kotak. Added fuzzy fallback (name→symbol promotion). Added summary row filtering. Added parse error guidance UX in frontend. Updated broker dropdown to include Kotak Neo.
+- **2026-01-30:** Redesigned login & signup pages — split-screen layout (form left, dark showcase panel right). Sign In/Sign Up pill toggle, icon-prefixed inputs, password visibility toggle, styled dividers. Signup page mirrors same design. Auth layout contains shared split-screen shell.
+- **2026-01-30:** Showcase panel upgraded — 4-slide auto-rotating carousel (5s interval) with unique pictorial glass cards per feature: Track Portfolio (donut chart, holdings list, performance bars), Smart Advisor (rebalance alert, AI chat, health score), Market Intel (news feed, sector heatmap, analyst picks), Sentiment Index (gauge, trending signals, social buzz). Line grid background, clickable pagination dots. Cards straightened (no rotation).
+- **2026-01-30:** Added social login buttons (Google, Apple, Facebook, X) with brand SVG icons on both login and signup pages. Buttons show toast "coming soon" — no backend OAuth yet.
+- **2026-01-30:** Added 5th carousel slide "New Avenues" (Upcoming IPOs, New Funds, Alternative Investments). Enlarged pagination dots for easier clicking (h-2.5/w-2.5 inactive, h-2.5/w-14 active).
+
+---
+
+## Development Notes
+
+- Dev server: `cd frontend && npm run dev` (Turbopack, port 3000)
+- Backend: runs via Docker or `uvicorn app.main:app` on port 8000
+- The `.next` cache can corrupt on OneDrive — fix by deleting `.next/` and restarting
+- `@next/swc` version mismatch warning (15.5.7 vs 15.5.11) is benign
+- 15 asset classes supported (Indian equity, US equity, MF, crypto, gold variants, FD, PPF, EPF, NPS, real estate, bonds)

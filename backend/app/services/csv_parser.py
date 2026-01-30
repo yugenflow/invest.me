@@ -206,7 +206,12 @@ def fuzzy_match_columns(headers: list[str]) -> dict[str, str]:
 
 
 def has_essential_columns(mapping: dict[str, str]) -> bool:
-    """Check if we found the 3 essential columns: symbol, quantity, avg_buy_price."""
+    """Check if we found the 3 essential columns: symbol, quantity, avg_buy_price.
+
+    Falls back: if 'symbol' is missing but 'name' is present, promote 'name' to 'symbol'.
+    """
+    if "symbol" not in mapping and "name" in mapping:
+        mapping["symbol"] = mapping["name"]
     return all(f in mapping for f in ESSENTIAL_FIELDS)
 
 
@@ -270,9 +275,45 @@ def parse_upstox_csv(content: str) -> list[dict]:
     return holdings
 
 
+def parse_kotak_csv(content: str) -> list[dict]:
+    """Parse Kotak Neo holdings CSV format.
+
+    Kotak uses 'Name' for the stock ticker and 'Avg. Price' for buy price.
+    Has a summary 'Total' row at the bottom that must be skipped.
+    """
+    header_idx, _h = _find_header_row(content)
+    reader = _get_data_rows(content, header_idx)
+    holdings = []
+    for row in reader:
+        try:
+            symbol = (row.get("Name") or "").strip()
+            if not symbol or symbol.lower() == "total":
+                continue
+            qty = _clean_number(row.get("Quantity") or "0")
+            if qty == 0:
+                continue
+            avg_price = _clean_number(row.get("Avg. Price") or "0")
+            # Kotak may show '-' for delisted stocks; skip those with no price
+            if avg_price == 0:
+                continue
+            holdings.append({
+                "symbol": symbol,
+                "name": symbol,
+                "quantity": qty,
+                "avg_buy_price": avg_price,
+                "asset_class_code": "EQUITY_IN",
+                "exchange": "NSE",
+                "buy_currency": "INR",
+            })
+        except (ValueError, KeyError):
+            continue
+    return holdings
+
+
 PARSERS = {
     "zerodha": parse_zerodha_csv,
     "upstox": parse_upstox_csv,
+    "kotak": parse_kotak_csv,
 }
 
 
@@ -281,6 +322,7 @@ PARSERS = {
 BROKER_SIGNATURES: dict[str, set[str]] = {
     "zerodha": {"Instrument", "Qty.", "Avg. cost"},
     "upstox": {"Symbol", "Net Qty", "Avg. Price", "Category"},
+    "kotak": {"Name", "Quantity", "Avg. Price", "LTP", "Invested Value", "Current Value"},
 }
 
 
@@ -302,6 +344,8 @@ def detect_broker(headers: list[str]) -> tuple[str | None, float]:
 
 # --- Generic CSV parser ---
 
+_SUMMARY_ROW_MARKERS = {"total", "grand total", "sub total", "subtotal", "summary", ""}
+
 def parse_generic_csv(content: str, column_mapping: dict[str, str]) -> list[dict]:
     """Parse any CSV using a column mapping (our field -> CSV header name)."""
     header_idx, _h = _find_header_row(content)
@@ -316,7 +360,10 @@ def parse_generic_csv(content: str, column_mapping: dict[str, str]) -> list[dict
             quantity = _clean_number(row.get(column_mapping.get("quantity", "")) or "0")
             avg_buy_price = _clean_number(row.get(column_mapping.get("avg_buy_price", "")) or "0")
 
-            if not symbol or quantity == 0:
+            # Skip summary/total rows
+            if symbol.lower() in _SUMMARY_ROW_MARKERS or quantity == 0:
+                continue
+            if not symbol:
                 continue
 
             # Extract exchange from category-style fields like "NSE EQ" -> "NSE"
