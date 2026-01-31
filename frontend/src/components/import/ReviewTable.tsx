@@ -5,9 +5,10 @@ import type { ImportRow } from "@/types";
 
 interface ReviewTableProps {
   rows: ImportRow[];
+  duplicateSymbols?: Set<string>;
 }
 
-export default function ReviewTable({ rows }: ReviewTableProps) {
+export default function ReviewTable({ rows, duplicateSymbols }: ReviewTableProps) {
   const totalValue = rows.reduce(
     (sum, r) => sum + r.quantity * r.avg_buy_price,
     0,
@@ -27,12 +28,23 @@ export default function ReviewTable({ rows }: ReviewTableProps) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, i) => (
+            {rows.map((row, i) => {
+              const isDupe = duplicateSymbols?.has(row.symbol?.toUpperCase());
+              return (
               <tr
                 key={i}
-                className="border-b border-gray-100 dark:border-gray-800"
+                className={`border-b border-gray-100 dark:border-gray-800 ${isDupe ? "bg-amber-50 dark:bg-amber-900/10" : ""}`}
               >
-                <td className="py-3 px-3 text-base font-semibold">{row.symbol}</td>
+                <td className="py-3 px-3 text-base font-semibold">
+                  <span className="flex items-center gap-2">
+                    {row.symbol}
+                    {isDupe && (
+                      <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-700 dark:text-amber-400">
+                        Dupe
+                      </span>
+                    )}
+                  </span>
+                </td>
                 <td className="py-3 px-3 text-base">{row.name}</td>
                 <td className="py-3 px-3 text-base text-right">{row.quantity}</td>
                 <td className="py-3 px-3 text-base text-right">
@@ -45,7 +57,8 @@ export default function ReviewTable({ rows }: ReviewTableProps) {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

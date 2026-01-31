@@ -105,3 +105,31 @@ async def delete_holding(
     # Soft delete
     holding.is_active = False
     await db.flush()
+
+
+from pydantic import BaseModel
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[uuid.UUID]
+
+
+@router.post("/bulk-delete", status_code=204)
+async def bulk_delete_holdings(
+    request: BulkDeleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Holding).where(
+            Holding.id.in_(request.ids),
+            Holding.user_id == current_user.id,
+            Holding.is_active == True,
+        )
+    )
+    holdings = result.scalars().all()
+    if not holdings:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No holdings found")
+    for holding in holdings:
+        holding.is_active = False
+    await db.flush()

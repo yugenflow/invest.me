@@ -29,7 +29,7 @@ export default function TopBar() {
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
-            placeholder="Search holdings..."
+            placeholder="Search anything..."
             className="w-full pl-11 pr-4 py-2.5 text-base rounded-full border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand-lime focus:border-brand-lime"
           />
         </div>

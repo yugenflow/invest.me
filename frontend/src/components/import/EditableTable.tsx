@@ -23,12 +23,14 @@ interface EditableTableProps {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
   showAddRow?: boolean;
+  duplicateSymbols?: Set<string>;
 }
 
 export default function EditableTable({
   rows,
   onChange,
   showAddRow,
+  duplicateSymbols,
 }: EditableTableProps) {
   const updateRow = (index: number, field: keyof ImportRow, value: string) => {
     const next = [...rows];
@@ -83,19 +85,28 @@ export default function EditableTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, i) => (
+            {rows.map((row, i) => {
+              const isDupe = duplicateSymbols?.has(row.symbol?.toUpperCase());
+              return (
               <tr
                 key={i}
-                className="border-b border-gray-100 dark:border-gray-800"
+                className={`border-b border-gray-100 dark:border-gray-800 ${isDupe ? "bg-amber-50 dark:bg-amber-900/10" : ""}`}
               >
                 <td className="py-2 px-2">
-                  <input
-                    type="text"
-                    value={row.name}
-                    onChange={(e) => updateRow(i, "name", e.target.value)}
-                    className={inputClass}
-                    placeholder="Company Name"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={row.name}
+                      onChange={(e) => updateRow(i, "name", e.target.value)}
+                      className={inputClass}
+                      placeholder="Company Name"
+                    />
+                    {isDupe && (
+                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-700 dark:text-amber-400">
+                        Dupe
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="py-2 px-2">
                   <input
@@ -160,7 +171,8 @@ export default function EditableTable({
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

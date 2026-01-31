@@ -134,3 +134,11 @@ export interface CsvUploadResult {
 export interface ColumnMapping {
   [ourField: string]: string;
 }
+
+export interface FileGroup {
+  fileName: string;
+  broker: string | null;
+  rows: ImportRow[];
+  error?: string;
+  excluded: boolean;
+}
