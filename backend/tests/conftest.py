@@ -75,24 +75,34 @@ SEED_ASSET_CLASSES = [
 
 @pytest.fixture(scope="session", autouse=True)
 async def create_tables():
-    """Create all tables and seed asset classes before tests, drop after."""
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Create all tables and seed asset classes before tests, drop after.
 
-    # Seed asset classes (required FK for holdings)
-    async with test_session() as session:
-        for ac_data in SEED_ASSET_CLASSES:
-            existing = await session.execute(
-                select(AssetClass).where(AssetClass.code == ac_data["code"])
-            )
-            if not existing.scalar_one_or_none():
-                session.add(AssetClass(**ac_data))
-        await session.commit()
+    Silently skips if the database is unreachable (allows pure/mocked tests
+    to run without Postgres).
+    """
+    try:
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        # Seed asset classes (required FK for holdings)
+        async with test_session() as session:
+            for ac_data in SEED_ASSET_CLASSES:
+                existing = await session.execute(
+                    select(AssetClass).where(AssetClass.code == ac_data["code"])
+                )
+                if not existing.scalar_one_or_none():
+                    session.add(AssetClass(**ac_data))
+            await session.commit()
+    except Exception:
+        pass  # DB not available — integration tests will fail, unit tests still run
 
     yield
 
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    try:
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+    except Exception:
+        pass
 
 
 @pytest.fixture
