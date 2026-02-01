@@ -61,8 +61,6 @@ async def test_find_duplicate_symbol_match(client, auth_headers):
         "avg_buy_price": 2500.0,
     }, headers=auth_headers)
 
-    # Create duplicate via import-confirm or direct POST — duplicate detection
-    # happens at the API layer; we test via the duplicates endpoint
     await client.post("/api/v1/holdings", json={
         "asset_class_code": "EQUITY_IN",
         "symbol": "reliance",
@@ -73,8 +71,7 @@ async def test_find_duplicate_symbol_match(client, auth_headers):
 
     res = await client.get("/api/v1/holdings/duplicates", headers=auth_headers)
     assert res.status_code == 200
-    groups = res.json()
-    # Should find a duplicate group for RELIANCE
+    groups = res.json()["groups"]
     reliance_group = [g for g in groups if any(
         h.get("symbol", "").upper() == "RELIANCE" for h in g
     )]
@@ -98,7 +95,7 @@ async def test_find_duplicate_name_match_fd(client, auth_headers):
 
     res = await client.get("/api/v1/holdings/duplicates", headers=auth_headers)
     assert res.status_code == 200
-    groups = res.json()
+    groups = res.json()["groups"]
     fd_group = [g for g in groups if any(
         h.get("asset_class_code") == "FIXED_DEPOSIT" for h in g
     )]
@@ -126,8 +123,7 @@ async def test_no_duplicate_different_symbols(client, auth_headers):
 
     res = await client.get("/api/v1/holdings/duplicates", headers=auth_headers)
     assert res.status_code == 200
-    groups = res.json()
-    # TCS and INFY should NOT be in the same group
+    groups = res.json()["groups"]
     for g in groups:
         symbols = {h.get("symbol", "").upper() for h in g}
         assert not ({"TCS", "INFY"} <= symbols)
@@ -138,5 +134,6 @@ async def test_duplicates_empty(client, auth_headers):
     """GET /holdings/duplicates returns empty when no dupes."""
     res = await client.get("/api/v1/holdings/duplicates", headers=auth_headers)
     assert res.status_code == 200
-    # Fresh user may have no holdings at all
-    assert isinstance(res.json(), list)
+    data = res.json()
+    assert "groups" in data
+    assert isinstance(data["groups"], list)

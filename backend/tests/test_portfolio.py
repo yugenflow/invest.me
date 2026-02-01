@@ -40,4 +40,7 @@ async def test_portfolio_allocation(client: AsyncClient, auth_headers: dict):
 async def test_portfolio_performance(client: AsyncClient, auth_headers: dict):
     res = await client.get("/api/v1/portfolio/performance?days=30", headers=auth_headers)
     assert res.status_code == 200
-    assert isinstance(res.json(), list)
+    data = res.json()
+    assert isinstance(data, dict)
+    assert "portfolio" in data
+    assert isinstance(data["portfolio"], list)
