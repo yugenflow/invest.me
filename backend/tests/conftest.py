@@ -77,32 +77,40 @@ SEED_ASSET_CLASSES = [
 async def create_tables():
     """Create all tables and seed asset classes before tests, drop after.
 
-    Silently skips if the database is unreachable (allows pure/mocked tests
+    Skips DB setup if the database is unreachable (allows pure/mocked tests
     to run without Postgres).
     """
+    _db_available = False
     try:
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        _db_available = True
+        print("\n[conftest] DB tables created successfully")
+    except Exception as e:
+        print(f"\n[conftest] DB not available, skipping table creation: {e}")
 
-        # Seed asset classes (required FK for holdings)
-        async with test_session() as session:
-            for ac_data in SEED_ASSET_CLASSES:
-                existing = await session.execute(
-                    select(AssetClass).where(AssetClass.code == ac_data["code"])
-                )
-                if not existing.scalar_one_or_none():
-                    session.add(AssetClass(**ac_data))
-            await session.commit()
-    except Exception:
-        pass  # DB not available — integration tests will fail, unit tests still run
+    if _db_available:
+        try:
+            async with test_session() as session:
+                for ac_data in SEED_ASSET_CLASSES:
+                    existing = await session.execute(
+                        select(AssetClass).where(AssetClass.code == ac_data["code"])
+                    )
+                    if not existing.scalar_one_or_none():
+                        session.add(AssetClass(**ac_data))
+                await session.commit()
+            print("[conftest] Asset classes seeded successfully")
+        except Exception as e:
+            print(f"[conftest] Failed to seed asset classes: {e}")
 
     yield
 
-    try:
-        async with test_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-    except Exception:
-        pass
+    if _db_available:
+        try:
+            async with test_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+        except Exception:
+            pass
 
 
 @pytest.fixture
