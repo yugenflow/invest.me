@@ -4,6 +4,7 @@ import uuid
 from typing import AsyncGenerator
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 
 from sqlalchemy import select
 
@@ -15,7 +16,7 @@ from app.models.asset_class import AssetClass
 # Use a separate test database or SQLite for tests
 TEST_DATABASE_URL = settings.DATABASE_URL
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 test_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
 
