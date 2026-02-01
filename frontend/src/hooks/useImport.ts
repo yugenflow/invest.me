@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import api from "@/lib/api";
-import type { CsvUploadResult, ImportRow, ColumnMapping, FileGroup } from "@/types";
+import type { CsvUploadResult, ImportRow, ColumnMapping, FileGroup, MfResolveResult, DuplicateCheckResult, RowAction } from "@/types";
 
 export function useImport() {
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
 
   const uploadCsv = async (
     file: File,
@@ -77,17 +79,43 @@ export function useImport() {
     }
   };
 
+  const checkDuplicates = async (rows: ImportRow[]): Promise<DuplicateCheckResult> => {
+    setCheckingDuplicates(true);
+    try {
+      const res = await api.post("/import/check-duplicates", { rows });
+      return res.data;
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  };
+
   const confirmImport = async (
     rows: ImportRow[],
     broker: string,
+    actions?: RowAction[],
   ): Promise<void> => {
     setConfirming(true);
     try {
-      await api.post("/import/csv/confirm", { rows, broker });
+      await api.post("/import/csv/confirm", { rows, broker, actions });
     } finally {
       setConfirming(false);
     }
   };
 
-  return { uploadCsv, uploadMultipleCsv, confirmImport, uploading, confirming };
+  const resolveMfNames = async (fundNames: string[]): Promise<MfResolveResult[]> => {
+    setResolving(true);
+    try {
+      const res = await api.post("/import/resolve-mf", { fund_names: fundNames });
+      return res.data.results;
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const resolveIsin = async (isin: string): Promise<{ resolved: boolean; yf_ticker?: string }> => {
+    const res = await api.post("/import/resolve-isin", { isin });
+    return res.data;
+  };
+
+  return { uploadCsv, uploadMultipleCsv, checkDuplicates, confirmImport, resolveMfNames, resolveIsin, uploading, confirming, resolving, checkingDuplicates };
 }

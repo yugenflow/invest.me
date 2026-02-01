@@ -17,16 +17,16 @@ export default function DonutChart({ data }: DonutChartProps) {
   }
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="w-44 h-44 shrink-0">
+    <div className="flex flex-col items-center">
+      <div className="w-64 h-64 shrink-0">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={data}
               cx="50%"
               cy="50%"
-              innerRadius={42}
-              outerRadius={68}
+              innerRadius={65}
+              outerRadius={110}
               dataKey="percentage"
               nameKey="asset_class_name"
               paddingAngle={2}
@@ -48,7 +48,7 @@ export default function DonutChart({ data }: DonutChartProps) {
           </PieChart>
         </ResponsiveContainer>
       </div>
-      <div className="flex flex-col gap-3 min-w-0">
+      <div className="flex flex-col gap-3 w-full mt-4">
         {data.map((item, i) => (
           <div key={i} className="flex items-center gap-2 text-[15px]">
             <span

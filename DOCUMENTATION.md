@@ -810,14 +810,12 @@ docker-compose exec backend python scripts/seed_asset_classes.py
 - [x] Responsive design
 
 ### Phase 2 — Intelligence Layer (In Progress)
-- [ ] Live market data integration (equity prices, MF NAVs)
-- [ ] Smart Advisor — AI chat for investment Q&A
-- [ ] Market Intelligence — news aggregation, sector analysis
-- [ ] Rebalance Suggestions — AI-powered allocation optimization
+- [x] Live market data integration (equity prices, MF NAVs)
+- [ ] Smart Advisor — Advice layer, rebalancing, alerts & red flags, macro intelligence, optimization. 
+- [ ] Market Intelligence — news aggregation, sector analysis, Expert Opinion — curated analyst insights (reports seeded by our own in-house experts)
 
 ### Phase 3 — Advanced Analytics
 - [ ] Sentiment Index — market mood from social/news signals
-- [ ] Expert Opinion — curated analyst insights
 - [ ] New Avenues — IPO tracking, new fund alerts
 - [ ] XIRR / TWR performance calculations
 - [ ] Tax harvesting suggestions
@@ -829,6 +827,12 @@ docker-compose exec backend python scripts/seed_asset_classes.py
 - [ ] Email notifications and alerts
 - [ ] Portfolio sharing / advisor collaboration
 - [ ] Multi-currency support with FX rates
+- [ ] Guided walkthrough of the platform like those guided feature walkthroughs
+
+### Phase 5 - Additional Features
+- [ ] Flexible grid for portfolio => allow user to drag and drop stats, metrics, change dashboard layout
+- [ ] AI-chatbot for all things that a user may require to do on the platform
+
 
 ---
 
@@ -850,3 +854,8 @@ docker-compose exec backend python scripts/seed_asset_classes.py
 - Added social login buttons (Google, Apple, Facebook, X) on login and signup — UI placeholders with toast notifications
 - Added 5th carousel slide "New Avenues" with IPOs, new funds, and alternative investments pictorials
 - Enlarged carousel pagination dots for easier click targets
+- CSV format help section now has Indian Equity / Crypto asset class toggle with per-class column tables
+- Crypto tab shows expected headers with "coming soon" banner (parser not yet implemented)
+
+### Scope Note — Asset Classes
+The platform currently supports **Indian equity** as the primary asset class for all features (CSV import, dashboard, portfolio analytics). Crypto, US equity, and other asset classes are referenced in the UI and planned for future phases but are **not yet implemented** in the backend parser or analytics layer. Manual entry can be used as a workaround for non-equity holdings.

@@ -10,11 +10,12 @@ import TopMoverCard from "@/components/dashboard/TopMoverCard";
 import HoldingsTable from "@/components/dashboard/HoldingsTable";
 import HoldingForm from "@/components/portfolio/HoldingForm";
 import DonutChart from "@/components/charts/DonutChart";
-import PerformanceChart from "@/components/charts/PerformanceChart";
-import { useDashboard } from "@/hooks/useDashboard";
+import PerformanceChart, { type ViewMode } from "@/components/charts/PerformanceChart";
+import { useDashboard, useDuplicateGroups } from "@/hooks/useDashboard";
+import DuplicateCleanupModal from "@/components/dashboard/DuplicateCleanupModal";
 import { useHoldings } from "@/hooks/usePortfolio";
 import { formatCurrency, formatPercent } from "@/lib/utils";
-import { Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, CheckSquare, HelpCircle } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import type { Holding } from "@/types";
@@ -38,15 +39,22 @@ type DeleteConfirm =
 
 export default function DashboardPage() {
   const { data, loading, refetch: refetchDashboard } = useDashboard();
-  const { holdings, loading: holdingsLoading, refetch: refetchHoldings } = useHoldings();
+  const { holdings: rawHoldings, loading: holdingsLoading, refetch: refetchHoldings } = useHoldings();
+  const { groups: duplicateGroups, refetch: refetchDuplicates } = useDuplicateGroups();
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  // Use enriched holdings from dashboard API (with live prices) when available
+  const holdings = data?.all_holdings ?? rawHoldings;
   const [selectedRange, setSelectedRange] = useState(2);
   const [chartMode, setChartMode] = useState<ChartMode>("line");
-  const [performanceData, setPerformanceData] = useState<any[] | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("portfolio");
+  const [performanceData, setPerformanceData] = useState<any | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editHolding, setEditHolding] = useState<Holding | undefined>();
+  const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm>(null);
   const [deleting, setDeleting] = useState(false);
+  const [showPerfInfo, setShowPerfInfo] = useState(false);
 
   const handleRangeChange = async (index: number) => {
     setSelectedRange(index);
@@ -112,6 +120,11 @@ export default function DashboardPage() {
     }
   };
 
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
   const openEdit = (h: Holding) => {
     setEditHolding(h);
     setShowForm(true);
@@ -163,6 +176,24 @@ export default function DashboardPage() {
         </Button>
       </div>
 
+      {/* Duplicate holdings banner */}
+      {duplicateGroups.length > 0 && (
+        <div className="flex items-center gap-3 rounded-card border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 mb-6">
+          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+          <p className="text-sm text-amber-700 dark:text-amber-400 flex-1">
+            We found <strong>{duplicateGroups.length} group{duplicateGroups.length !== 1 ? "s" : ""}</strong> of duplicate holdings in your portfolio.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-300 dark:border-amber-600 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/20 shrink-0"
+            onClick={() => setShowDuplicateModal(true)}
+          >
+            Review & Merge
+          </Button>
+        </div>
+      )}
+
       {/* Row 1: Net Worth + Stat Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
         <NetWorthCard summary={summary} />
@@ -184,9 +215,50 @@ export default function DashboardPage() {
       {/* Row 2: Performance Chart + Allocation Donut */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
         <Card className="col-span-full lg:col-span-8">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-heading font-bold">Performance</h3>
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div className="flex items-center gap-2">
+              <h3 className="text-lg font-heading font-bold">Performance</h3>
+              <button
+                onClick={() => setShowPerfInfo(true)}
+                className="p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-navy-700 transition-colors"
+                title="How is this chart calculated?"
+              >
+                <HelpCircle className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" />
+              </button>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex gap-1 bg-gray-50 dark:bg-navy-900 border border-gray-200 dark:border-navy-700 p-1 rounded-lg">
+                <button
+                  onClick={() => setViewMode("portfolio")}
+                  className={`px-3 py-1.5 text-sm rounded font-medium transition-colors ${
+                    viewMode === "portfolio"
+                      ? "bg-white dark:bg-navy-800 shadow-sm border border-gray-100 dark:border-navy-700 text-brand-black dark:text-white font-bold"
+                      : "text-gray-500 dark:text-gray-400 hover:text-brand-black dark:hover:text-white"
+                  }`}
+                >
+                  Portfolio
+                </button>
+                <button
+                  onClick={() => setViewMode("by_category")}
+                  className={`px-3 py-1.5 text-sm rounded font-medium transition-colors ${
+                    viewMode === "by_category"
+                      ? "bg-white dark:bg-navy-800 shadow-sm border border-gray-100 dark:border-navy-700 text-brand-black dark:text-white font-bold"
+                      : "text-gray-500 dark:text-gray-400 hover:text-brand-black dark:hover:text-white"
+                  }`}
+                >
+                  By Asset Class
+                </button>
+                <button
+                  onClick={() => setViewMode("benchmarks")}
+                  className={`px-3 py-1.5 text-sm rounded font-medium transition-colors ${
+                    viewMode === "benchmarks"
+                      ? "bg-white dark:bg-navy-800 shadow-sm border border-gray-100 dark:border-navy-700 text-brand-black dark:text-white font-bold"
+                      : "text-gray-500 dark:text-gray-400 hover:text-brand-black dark:hover:text-white"
+                  }`}
+                >
+                  vs Indices
+                </button>
+              </div>
               <div className="flex gap-1 bg-gray-50 dark:bg-navy-900 border border-gray-200 dark:border-navy-700 p-1 rounded-lg">
                 <button
                   onClick={() => handleChartModeChange("line")}
@@ -222,7 +294,7 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-          <PerformanceChart data={performanceData || data.performance} />
+          <PerformanceChart data={performanceData || data.performance} viewMode={viewMode} />
         </Card>
 
         <Card className="col-span-full lg:col-span-4">
@@ -237,14 +309,35 @@ export default function DashboardPage() {
           <h3 className="text-lg font-heading font-bold">Holdings</h3>
           {holdings.length > 0 && (
             <div className="flex items-center gap-2">
-              {selectedIds.size > 0 && (
+              {selectMode ? (
+                <>
+                  {selectedIds.size > 0 && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleDeleteSelected}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                      Delete Selected ({selectedIds.size})
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={exitSelectMode}
+                    className="font-semibold text-brand-lime"
+                  >
+                    Done
+                  </Button>
+                </>
+              ) : (
                 <Button
-                  variant="danger"
+                  variant="ghost"
                   size="sm"
-                  onClick={handleDeleteSelected}
+                  onClick={() => setSelectMode(true)}
                 >
-                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                  Delete Selected ({selectedIds.size})
+                  <CheckSquare className="w-3.5 h-3.5 mr-1.5" />
+                  Select
                 </Button>
               )}
               <Button
@@ -266,6 +359,7 @@ export default function DashboardPage() {
             holdings={holdings}
             onEdit={openEdit}
             onDelete={handleDelete}
+            selectMode={selectMode}
             selectedIds={selectedIds}
             onSelectionChange={setSelectedIds}
           />
@@ -323,6 +417,56 @@ export default function DashboardPage() {
             >
               Delete
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Duplicate Cleanup Modal */}
+      <DuplicateCleanupModal
+        isOpen={showDuplicateModal}
+        onClose={() => setShowDuplicateModal(false)}
+        groups={duplicateGroups}
+        onMerged={() => {
+          refetchDuplicates();
+          refetchHoldings();
+          refetchDashboard();
+        }}
+      />
+
+      {/* Performance Chart Info Modal */}
+      <Modal isOpen={showPerfInfo} onClose={() => setShowPerfInfo(false)} title="Understanding the Performance Chart" className="max-w-md">
+        <div className="space-y-4 text-sm text-gray-600 dark:text-gray-300">
+          <div>
+            <h4 className="font-bold text-gray-900 dark:text-white mb-1">Portfolio View</h4>
+            <p>
+              Shows your total portfolio value over time. Each point is the sum of all your
+              holdings valued at that day&apos;s closing price. Non-priceable assets (FDs, PPF, etc.)
+              are held constant at cost.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-bold text-gray-900 dark:text-white mb-1">By Asset Class</h4>
+            <p>
+              Breaks down your portfolio value by category (Equity, Funds, Gold, Crypto, etc.).
+              Each line shows the total value of all holdings in that asset class over time.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-bold text-gray-900 dark:text-white mb-1">vs Indices</h4>
+            <p>
+              Compares your portfolio against major benchmarks. Benchmark values are <strong>normalized</strong> to
+              your portfolio&apos;s starting value on the first day of the chart. This answers: <em>&ldquo;If I had invested
+              the same amount in Nifty 50 / S&P 500 / Gold / Bitcoin instead, what would it be worth today?&rdquo;</em>
+            </p>
+            <p className="mt-2">
+              Lines above your portfolio mean that benchmark outperformed you. Lines below mean you beat it.
+            </p>
+          </div>
+          <div className="pt-2 border-t border-gray-100 dark:border-navy-700">
+            <p className="text-xs text-gray-400">
+              Historical prices are sourced from Yahoo Finance (end-of-day close). Weekends and holidays
+              carry forward the last known price. Data is backfilled for up to 1 year when a holding is first added.
+            </p>
           </div>
         </div>
       </Modal>

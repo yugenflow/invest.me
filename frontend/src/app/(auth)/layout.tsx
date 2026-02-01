@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   TrendingUp,
   PieChart,
@@ -449,18 +449,62 @@ const SLIDE_CARDS = [PortfolioCards, AdvisorCards, MarketIntelCards, SentimentCa
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const [active, setActive] = useState(0);
+  const [displayed, setDisplayed] = useState(0);
+  const [animating, setAnimating] = useState(false);
+  const [phase, setPhase] = useState<"in" | "out">("in");
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const goTo = useCallback((index: number) => {
+    if (animating) return;
+    setAnimating(true);
+    setPhase("out");
+
+    // After fade-out completes, swap content and fade in
+    setTimeout(() => {
+      setDisplayed(index);
+      setActive(index);
+      setPhase("in");
+
+      setTimeout(() => {
+        setAnimating(false);
+      }, 500);
+    }, 400);
+  }, [animating]);
 
   const next = useCallback(() => {
-    setActive((prev) => (prev + 1) % SLIDES.length);
-  }, []);
+    goTo((active + 1) % SLIDES.length);
+  }, [active, goTo]);
 
+  // Auto-advance timer
   useEffect(() => {
-    const timer = setInterval(next, 5000);
-    return () => clearInterval(timer);
+    timerRef.current = setInterval(next, 5000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [next]);
 
-  const slide = SLIDES[active];
-  const Cards = SLIDE_CARDS[active];
+  // Reset timer on manual dot click
+  const handleDotClick = (index: number) => {
+    if (index === active) return;
+    if (timerRef.current) clearInterval(timerRef.current);
+    goTo(index);
+  };
+
+  const slide = SLIDES[displayed];
+  const Cards = SLIDE_CARDS[displayed];
+
+  // Transition classes: fade + subtle vertical shift
+  const transitionStyle: React.CSSProperties = {
+    transition: "opacity 400ms cubic-bezier(0.4, 0, 0.2, 1), transform 400ms cubic-bezier(0.4, 0, 0.2, 1)",
+    opacity: phase === "in" ? 1 : 0,
+    transform: phase === "in" ? "translateY(0)" : "translateY(16px)",
+  };
+
+  const taglineStyle: React.CSSProperties = {
+    transition: "opacity 400ms cubic-bezier(0.4, 0, 0.2, 1) 80ms, transform 400ms cubic-bezier(0.4, 0, 0.2, 1) 80ms",
+    opacity: phase === "in" ? 1 : 0,
+    transform: phase === "in" ? "translateY(0)" : "translateY(12px)",
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-black p-4 lg:p-8">
@@ -504,13 +548,13 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           {/* Glow */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-brand-lime/8 blur-[120px] pointer-events-none rounded-full" />
 
-          {/* Slide cards */}
-          <div className="relative z-10 w-full mb-12">
+          {/* Slide cards — animated */}
+          <div className="relative z-10 w-full mb-12" style={transitionStyle}>
             <Cards />
           </div>
 
-          {/* Tagline */}
-          <div className="text-center max-w-lg z-10 relative">
+          {/* Tagline — animated with slight delay */}
+          <div className="text-center max-w-lg z-10 relative" style={taglineStyle}>
             <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-8 backdrop-blur-xl border border-white/10">
               {slide.icon}
             </div>
@@ -526,8 +570,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
               {SLIDES.map((_, i) => (
                 <button
                   key={i}
-                  onClick={() => setActive(i)}
-                  className={`rounded-full transition-all ${
+                  onClick={() => handleDotClick(i)}
+                  className={`rounded-full transition-all duration-300 ${
                     i === active
                       ? "h-2.5 w-14 bg-brand-lime"
                       : "h-2.5 w-2.5 bg-white/20 hover:bg-white/40"

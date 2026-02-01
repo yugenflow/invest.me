@@ -38,13 +38,14 @@ function formatAssetCode(code: string) {
     .join(" ");
 }
 
-type SortField = "balance" | "gainLoss" | "netWorthPct";
+type SortField = "balance" | "dailyPL" | "gainLoss" | "netWorthPct";
 type SortDir = "asc" | "desc";
 
 interface HoldingsTableProps {
   holdings: Holding[];
   onEdit: (holding: Holding) => void;
   onDelete: (id: string) => void;
+  selectMode: boolean;
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
 }
@@ -53,6 +54,7 @@ export default function HoldingsTable({
   holdings,
   onEdit,
   onDelete,
+  selectMode,
   selectedIds,
   onSelectionChange,
 }: HoldingsTableProps) {
@@ -101,6 +103,13 @@ export default function HoldingsTable({
         if (sortField === "balance") {
           va = a.current_value ?? a.quantity * a.avg_buy_price;
           vb = b.current_value ?? b.quantity * b.avg_buy_price;
+        } else if (sortField === "dailyPL") {
+          const aPrice = a.current_value ? a.current_value / (a.quantity || 1) : a.avg_buy_price;
+          const bPrice = b.current_value ? b.current_value / (b.quantity || 1) : b.avg_buy_price;
+          const aDayPct = a.day_change_pct ?? 0;
+          const bDayPct = b.day_change_pct ?? 0;
+          va = a.quantity * aPrice * (aDayPct / 100);
+          vb = b.quantity * bPrice * (bDayPct / 100);
         } else if (sortField === "gainLoss") {
           va = a.gain_loss ?? 0;
           vb = b.gain_loss ?? 0;
@@ -227,17 +236,19 @@ export default function HoldingsTable({
       {filtered.length > 0 && <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b border-gray-200 dark:border-navy-700 text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">
-            <th className="py-4 px-4 w-10">
-              <input
-                type="checkbox"
-                checked={allFilteredSelected}
-                ref={(el) => {
-                  if (el) el.indeterminate = someFilteredSelected;
-                }}
-                onChange={toggleSelectAll}
-                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-brand-lime focus:ring-brand-lime cursor-pointer accent-[#D4F358]"
-              />
-            </th>
+            {selectMode && (
+              <th className="py-4 px-4 w-10">
+                <input
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someFilteredSelected;
+                  }}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-brand-lime focus:ring-brand-lime cursor-pointer accent-[#D4F358]"
+                />
+              </th>
+            )}
             <th className="py-4 px-4 font-semibold">Asset</th>
             <th className="py-4 px-4 font-semibold">Price</th>
             <th
@@ -250,10 +261,18 @@ export default function HoldingsTable({
             </th>
             <th
               className="py-4 px-4 font-semibold cursor-pointer select-none hover:text-brand-black dark:hover:text-white transition-colors"
+              onClick={() => toggleSort("dailyPL")}
+            >
+              <span className="inline-flex items-center gap-1">
+                Daily P/L <SortIcon field="dailyPL" />
+              </span>
+            </th>
+            <th
+              className="py-4 px-4 font-semibold cursor-pointer select-none hover:text-brand-black dark:hover:text-white transition-colors"
               onClick={() => toggleSort("gainLoss")}
             >
               <span className="inline-flex items-center gap-1">
-                Gain / Loss <SortIcon field="gainLoss" />
+                Net P/L <SortIcon field="gainLoss" />
               </span>
             </th>
             <th
@@ -273,6 +292,10 @@ export default function HoldingsTable({
             const gainLoss = h.gain_loss ?? 0;
             const gainLossPct = h.gain_loss_pct ?? 0;
             const isPositive = gainLoss >= 0;
+            const dayChangePct = h.day_change_pct ?? 0;
+            const currentPrice = h.current_value ? h.current_value / (h.quantity || 1) : h.avg_buy_price;
+            const dailyPL = h.quantity * currentPrice * (dayChangePct / 100);
+            const isDayPositive = dailyPL >= 0;
             const meta = getAssetMeta(h.asset_class_code);
             const netWorthPct = totalPortfolioValue > 0 ? (value / totalPortfolioValue) * 100 : 0;
             const isSelected = selectedIds.has(h.id);
@@ -286,14 +309,16 @@ export default function HoldingsTable({
                     : "hover:bg-gray-50 dark:hover:bg-navy-700/50"
                 }`}
               >
-                <td className="py-4 px-4">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleSelect(h.id)}
-                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-brand-lime focus:ring-brand-lime cursor-pointer accent-[#D4F358]"
-                  />
-                </td>
+                {selectMode && (
+                  <td className="py-4 px-4">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(h.id)}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-brand-lime focus:ring-brand-lime cursor-pointer accent-[#D4F358]"
+                    />
+                  </td>
+                )}
                 <td className="py-4 px-4">
                   <div className="flex items-center gap-2.5">
                     <span
@@ -308,10 +333,21 @@ export default function HoldingsTable({
                   </div>
                 </td>
                 <td className="py-4 px-4 text-[15px] font-medium">
-                  {formatCurrency(h.avg_buy_price, h.buy_currency)}
+                  {formatCurrency(
+                    h.current_value ? h.current_value / (h.quantity || 1) : h.avg_buy_price,
+                    h.buy_currency
+                  )}
                 </td>
                 <td className="py-4 px-4 text-[15px] font-medium">
                   {formatCurrency(value, h.buy_currency)}
+                </td>
+                <td className="py-4 px-4">
+                  <span className={`text-[15px] font-bold ${isDayPositive ? "text-gain" : "text-alert-red"}`}>
+                    {isDayPositive ? "+" : ""}{formatCurrency(dailyPL, h.buy_currency)}
+                  </span>
+                  <div className={`text-sm font-medium ${isDayPositive ? "text-gain" : "text-alert-red"}`}>
+                    {isDayPositive ? "+" : ""}{dayChangePct.toFixed(2)}%
+                  </div>
                 </td>
                 <td className="py-4 px-4">
                   <span className={`text-[15px] font-bold ${isPositive ? "text-gain" : "text-alert-red"}`}>

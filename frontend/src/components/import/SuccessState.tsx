@@ -7,20 +7,44 @@ import Link from "next/link";
 interface SuccessStateProps {
   count: number;
   onClose: () => void;
+  summary?: {
+    created: number;
+    merged: number;
+    replaced: number;
+    skipped: number;
+  };
 }
 
-export default function SuccessState({ count, onClose }: SuccessStateProps) {
+export default function SuccessState({ count, onClose, summary }: SuccessStateProps) {
+  const effectiveCount = summary ? summary.created + summary.merged + summary.replaced : count;
+  const allSkipped = summary ? effectiveCount === 0 && summary.skipped > 0 : false;
+
   return (
     <div className="text-center py-10">
       <div className="w-20 h-20 bg-brand-lime/20 rounded-full flex items-center justify-center mx-auto mb-5">
         <Check className="w-10 h-10 text-brand-lime" />
       </div>
       <h2 className="text-2xl font-heading font-bold mb-2">
-        Import Complete
+        {allSkipped ? "All Holdings Skipped" : "Import Complete"}
       </h2>
-      <p className="text-base text-gray-500 dark:text-gray-400 mb-8">
-        {count} holding{count !== 1 ? "s" : ""} imported successfully.
-      </p>
+      {summary ? (
+        <div className="text-base text-gray-500 dark:text-gray-400 mb-8 space-y-1">
+          {allSkipped ? (
+            <p>{summary.skipped} holding{summary.skipped !== 1 ? "s were" : " was"} skipped — no changes made.</p>
+          ) : (
+            <>
+              {summary.created > 0 && <p>{summary.created} new holding{summary.created !== 1 ? "s" : ""} added</p>}
+              {summary.merged > 0 && <p>{summary.merged} holding{summary.merged !== 1 ? "s" : ""} merged with existing</p>}
+              {summary.replaced > 0 && <p>{summary.replaced} existing holding{summary.replaced !== 1 ? "s" : ""} replaced</p>}
+              {summary.skipped > 0 && <p>{summary.skipped} holding{summary.skipped !== 1 ? "s" : ""} skipped</p>}
+            </>
+          )}
+        </div>
+      ) : (
+        <p className="text-base text-gray-500 dark:text-gray-400 mb-8">
+          {count} holding{count !== 1 ? "s" : ""} imported successfully.
+        </p>
+      )}
       <div className="flex items-center justify-center gap-4">
         <Link href="/dashboard">
           <Button size="lg">View Portfolio</Button>

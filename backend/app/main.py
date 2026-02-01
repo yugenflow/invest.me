@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine
 from app.redis import redis_client
-from app.api.v1 import auth, users, onboarding, holdings, asset_classes, transactions, csv_import, portfolio, dashboard
+from app.api.v1 import auth, users, onboarding, holdings, asset_classes, transactions, csv_import, portfolio, dashboard, prices
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.include_router(transactions.router, prefix="/api/v1")
 app.include_router(csv_import.router, prefix="/api/v1")
 app.include_router(portfolio.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(prices.router, prefix="/api/v1")
 
 
 @app.get("/")

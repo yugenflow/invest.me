@@ -4,6 +4,7 @@ from app.database import get_db
 from app.models.user import User
 from app.utils.security import get_current_user
 from app.services import portfolio_service
+from app.redis import get_redis
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -12,16 +13,18 @@ router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 async def portfolio_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ):
-    return await portfolio_service.get_portfolio_summary(db, current_user.id)
+    return await portfolio_service.get_portfolio_summary(db, current_user.id, redis=redis)
 
 
 @router.get("/allocation")
 async def portfolio_allocation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ):
-    return await portfolio_service.get_allocation(db, current_user.id)
+    return await portfolio_service.get_allocation(db, current_user.id, redis=redis)
 
 
 @router.get("/performance")
@@ -29,5 +32,6 @@ async def portfolio_performance(
     days: int = Query(30, ge=7, le=365),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ):
-    return await portfolio_service.get_performance(db, current_user.id, days)
+    return await portfolio_service.get_performance(db, current_user.id, days, redis=redis)

@@ -38,6 +38,8 @@ export interface Holding {
   current_value?: number;
   gain_loss?: number;
   gain_loss_pct?: number;
+  day_change_pct?: number;
+  value?: number;
 }
 
 export interface Transaction {
@@ -97,11 +99,18 @@ export interface PerformancePoint {
   value: number;
 }
 
+export interface PerformanceData {
+  portfolio: PerformancePoint[];
+  by_category: Record<string, PerformancePoint[]>;
+  benchmarks: Record<string, PerformancePoint[]>;
+}
+
 export interface DashboardData {
   summary: PortfolioSummary;
   allocation: AllocationItem[];
-  performance: PerformancePoint[];
+  performance: PerformanceData;
   top_holdings: Holding[];
+  all_holdings: Holding[];
 }
 
 export interface CsvPreviewRow {
@@ -121,6 +130,23 @@ export interface ImportRow {
   asset_class_code: string;
   exchange?: string;
   buy_currency: string;
+  interest_rate?: number;
+  maturity_date?: string;
+  institution?: string;
+  buy_date?: string;
+  sebi_category?: string;
+  amount_invested?: number;
+  resolved_symbol?: string;
+  resolved_isin?: string;
+  matched_name?: string;
+}
+
+export interface MfResolveResult {
+  fund_name: string;
+  resolved: boolean;
+  yf_ticker?: string;
+  isin?: string;
+  matched_name?: string;
 }
 
 export interface CsvUploadResult {
@@ -141,4 +167,50 @@ export interface FileGroup {
   rows: ImportRow[];
   error?: string;
   excluded: boolean;
+}
+
+// --- Duplicate detection types ---
+
+export interface ExistingHoldingInfo {
+  id: string;
+  symbol?: string;
+  name: string;
+  quantity: number;
+  avg_buy_price: number;
+  asset_class_code: string;
+  buy_currency: string;
+}
+
+export interface DuplicateMatch {
+  row_index: number;
+  incoming_symbol?: string;
+  incoming_name?: string;
+  incoming_quantity: number;
+  incoming_avg_price: number;
+  existing: ExistingHoldingInfo;
+  merged_quantity: number;
+  merged_avg_price: number;
+}
+
+export interface DuplicateCheckResult {
+  duplicates: DuplicateMatch[];
+  clean_count: number;
+}
+
+export type ConflictAction = "merge" | "skip" | "replace";
+
+export interface RowAction {
+  action: "create" | "merge" | "replace" | "skip";
+  existing_holding_id?: string;
+}
+
+export interface DuplicateGroup {
+  id: string;
+  symbol?: string;
+  name: string;
+  quantity: number;
+  avg_buy_price: number;
+  asset_class_code: string;
+  buy_currency: string;
+  created_at?: string;
 }

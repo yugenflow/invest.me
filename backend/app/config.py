@@ -19,8 +19,13 @@ class Settings(BaseSettings):
     # Celery
     CELERY_BROKER_URL: str = "redis://redis:6379/1"
 
+    # Price Service
+    PRICE_CACHE_TTL_SECONDS: int = 900  # 15 minutes
+    YFINANCE_BATCH_SIZE: int = 50
+    PRICE_HISTORY_BACKFILL_DAYS: int = 365
+
     # CORS
-    CORS_ORIGINS: str = '["http://localhost:3000"]'
+    CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:3001"]'
 
     @property
     def cors_origins_list(self) -> List[str]:

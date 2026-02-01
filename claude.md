@@ -3,7 +3,7 @@
 > This file is read at the start of every Claude Code session.
 > Keep it updated after every significant change.
 
-**Last updated:** 2026-01-30
+**Last updated:** 2026-02-01
 
 ---
 
@@ -145,7 +145,7 @@ Invest.me/
 | Sentiment Index | 🔜 | 🔜 | Real-time market sentiment |
 | Expert Opinion | 🔜 | 🔜 | Curated expert insights |
 | New Avenues | 🔜 | 🔜 | IPOs, new funds, alt investments |
-| Live Market Data | — | 🔜 | Currently mock data; no live pricing yet |
+| Live Market Data | — | ✅ | yfinance + Redis cache + Celery Beat; 3-tier fallback |
 
 ---
 
@@ -157,13 +157,39 @@ Invest.me/
 - **2026-01-30:** Showcase panel upgraded — 4-slide auto-rotating carousel (5s interval) with unique pictorial glass cards per feature: Track Portfolio (donut chart, holdings list, performance bars), Smart Advisor (rebalance alert, AI chat, health score), Market Intel (news feed, sector heatmap, analyst picks), Sentiment Index (gauge, trending signals, social buzz). Line grid background, clickable pagination dots. Cards straightened (no rotation).
 - **2026-01-30:** Added social login buttons (Google, Apple, Facebook, X) with brand SVG icons on both login and signup pages. Buttons show toast "coming soon" — no backend OAuth yet.
 - **2026-01-30:** Added 5th carousel slide "New Avenues" (Upcoming IPOs, New Funds, Alternative Investments). Enlarged pagination dots for easier clicking (h-2.5/w-2.5 inactive, h-2.5/w-14 active).
+- **2026-01-31:** CSV format help now has Indian Equity / Crypto toggle. Equity tab shows current broker formats (Zerodha, Upstox, Kotak Neo). Crypto tab shows expected headers (Coin, Quantity, Avg Buy Price, Currency) with "coming soon" banner. Crypto support is UI-ready but not yet implemented in the parser — current focus is Indian equity.
+- **2026-02-01:** Live Market Data — Price Service. Added yfinance-based price fetching with 3-tier fallback (Redis cache → market_data table → cost basis). New files: `price_history.py` model, `price_service.py` (symbol mapping, caching, batch fetch), `tasks/price_tasks.py` (Celery tasks for 15-min current prices + daily EOD OHLCV with 1y backfill), `api/v1/prices.py` (manual refresh + cache status endpoints). Updated portfolio_service.py to use real market prices for summary, allocation, performance chart, and top holdings. Added celery-beat service to docker-compose.yml. Migration `002_add_price_history.py` for price_history table.
+- **2026-02-01:** Simplified Manual Entry forms — MF now asks Fund Name + Units + Amount Invested (derives NAV). Gold Physical/Digital ask Total Cost instead of Price/gram. Gold SGB asks Total Cost instead of Issue Price (defaults interest rate 2.5%). Added `required` flag to ColDef with red asterisk indicators in table headers. ReviewTable shows derived per-unit price as secondary info line.
+- **2026-02-01:** Mutual Fund name → Yahoo Finance ticker resolution. New `mf_resolver.py` service: fund name → mfapi.in search → ISIN → Yahoo Finance search → 0P...BO code. Redis-cached (7-day TTL). Auto-resolves on holding creation (`POST /holdings`) and CSV import confirm. New `resolve_mf_symbols` Celery task for batch resolution of unresolved MF holdings. Updated `to_yfinance_ticker()` for better MF code handling.
+- **2026-02-01:** Pre-import MF resolution with manual ISIN fallback. Manual entry for Indian Mutual Fund now has a 3-step flow: Entry → Resolve → Confirm. Fund names are batch-resolved via `POST /import/resolve-mf` before import. Failed resolutions show ISIN input for manual fallback via `POST /import/resolve-isin`. No MF holding gets created without a resolved symbol. Non-MF asset classes remain 2-step. Removed red asterisk indicators from EditableTable. Renamed "Mutual Fund" → "Indian Mutual Fund" in asset class dropdown. Widened Amount Invested column.
+
+---
+
+## Development Workflow
+
+**Roles:** User = Product Manager (ideation, strategy, plan approval, spot checks). Claude = Developer (planning, implementation, testing, version control).
+
+**Cycle:**
+
+1. **Ideate / Brainstorm** — User describes the feature, problem, or direction. Back-and-forth discussion to refine scope.
+2. **Plan** — Claude enters plan mode, explores codebase, produces a detailed implementation plan with file changes, UX flow, and verification steps.
+3. **Approve** — User reviews the plan, requests changes or approves.
+4. **Implement** — Claude writes the code across all files.
+5. **Test** — Claude runs the dev server, performs UI testing via Playwright MCP (navigation, form fills, screenshots, assertions) and API testing via curl/httpie. Reports results with screenshots.
+6. **Commit & Push** — On user's go-ahead, Claude commits with a descriptive message and pushes to the remote.
+
+**Testing tools:**
+- **Playwright MCP** — browser automation for E2E UI testing (navigate, click, type, screenshot, assert)
+- **Backend API tests** — curl/httpie against running backend endpoints
+- **TypeScript checks** — `tsc --noEmit` before every commit
 
 ---
 
 ## Development Notes
 
-- Dev server: `cd frontend && npm run dev` (Turbopack, port 3000)
+- Dev server: `cd frontend && npm run dev` (Turbopack, port 3000 or 3001)
 - Backend: runs via Docker or `uvicorn app.main:app` on port 8000
 - The `.next` cache can corrupt on OneDrive — fix by deleting `.next/` and restarting
 - `@next/swc` version mismatch warning (15.5.7 vs 15.5.11) is benign
 - 15 asset classes supported (Indian equity, US equity, MF, crypto, gold variants, FD, PPF, EPF, NPS, real estate, bonds)
+- Playwright MCP configured for browser-based UI testing

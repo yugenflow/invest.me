@@ -9,6 +9,7 @@ import DropZone from "./DropZone";
 import ColumnMapper from "./ColumnMapper";
 import EditableTable from "./EditableTable";
 import ReviewTable from "./ReviewTable";
+import ConflictResolutionStep from "./ConflictResolutionStep";
 import SuccessState from "./SuccessState";
 import { useImport } from "@/hooks/useImport";
 import toast from "react-hot-toast";
@@ -21,10 +22,12 @@ import {
   XCircle,
   Eye,
   EyeOff,
+  Loader2,
 } from "lucide-react";
-import type { ImportRow, ColumnMapping, FileGroup } from "@/types";
+import type { ImportRow, ColumnMapping, FileGroup, DuplicateMatch, ConflictAction, RowAction } from "@/types";
 
-const STEPS = ["Upload", "Review", "Confirm"];
+const STEPS_DEFAULT = ["Upload", "Review", "Confirm"];
+const STEPS_WITH_CONFLICTS = ["Upload", "Review", "Conflicts", "Confirm"];
 
 const BROKER_OPTIONS = [
   { value: "", label: "Auto-detect (recommended)" },
@@ -52,8 +55,18 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
   const [formatTab, setFormatTab] = useState<"equity" | "crypto">("equity");
   const [parseError, setParseError] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [importSummary, setImportSummary] = useState<{ created: number; merged: number; replaced: number; skipped: number } | undefined>();
+  const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  const [conflictActions, setConflictActions] = useState<Record<number, ConflictAction>>({});
+  const [hasConflicts, setHasConflicts] = useState(false);
 
-  const { uploadCsv, uploadMultipleCsv, confirmImport, uploading, confirming } = useImport();
+  const { uploadCsv, uploadMultipleCsv, checkDuplicates, confirmImport, uploading, confirming, checkingDuplicates } = useImport();
+
+  const steps = hasConflicts ? STEPS_WITH_CONFLICTS : STEPS_DEFAULT;
+  // Step indices
+  const reviewStep = 1;
+  const conflictStep = hasConflicts ? 2 : -1;
+  const confirmStepIdx = hasConflicts ? 3 : 2;
 
   // Compute duplicate symbols across non-excluded file groups
   const duplicateSymbols = useMemo(() => {
@@ -88,6 +101,36 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
     [activeGroups],
   );
 
+  // Conflict action breakdown for confirm step
+  const conflictSummary = useMemo(() => {
+    if (!hasConflicts || duplicates.length === 0) return null;
+    const dupIndices = new Set(duplicates.map((d) => d.row_index));
+    const validRows = allRows.filter((r) => r.symbol && r.quantity > 0);
+    let created = 0, merged = 0, replaced = 0, skipped = 0;
+    for (let i = 0; i < validRows.length; i++) {
+      if (dupIndices.has(i)) {
+        const action = conflictActions[i] || "merge";
+        if (action === "skip") skipped++;
+        else if (action === "merge") merged++;
+        else if (action === "replace") replaced++;
+      } else {
+        created++;
+      }
+    }
+    return { created, merged, replaced, skipped };
+  }, [hasConflicts, duplicates, conflictActions, allRows]);
+
+  const skippedIndices = useMemo(() => {
+    if (!hasConflicts || duplicates.length === 0) return undefined;
+    const set = new Set<number>();
+    for (const dup of duplicates) {
+      if (conflictActions[dup.row_index] === "skip") {
+        set.add(dup.row_index);
+      }
+    }
+    return set.size > 0 ? set : undefined;
+  }, [hasConflicts, duplicates, conflictActions]);
+
   const reset = () => {
     setStep(0);
     setFiles([]);
@@ -102,6 +145,10 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
     setFormatTab("equity");
     setParseError(false);
     setImportedCount(0);
+    setImportSummary(undefined);
+    setDuplicates([]);
+    setConflictActions({});
+    setHasConflicts(false);
   };
 
   const handleClose = () => {
@@ -206,6 +253,46 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
     handleUpload(columnMapping);
   };
 
+  const handleCheckDuplicates = async () => {
+    const validRows = allRows.filter((r) => r.symbol && r.quantity > 0);
+    if (validRows.length === 0) {
+      toast.error("No valid holdings to import");
+      return;
+    }
+    try {
+      const result = await checkDuplicates(validRows);
+      if (result.duplicates.length > 0) {
+        setDuplicates(result.duplicates);
+        // Default all to merge
+        const defaultActions: Record<number, ConflictAction> = {};
+        for (const dup of result.duplicates) {
+          defaultActions[dup.row_index] = "merge";
+        }
+        setConflictActions(defaultActions);
+        setHasConflicts(true);
+        setStep(2); // conflicts step
+      } else {
+        // No conflicts, go straight to confirm
+        setHasConflicts(false);
+        setStep(2); // confirm step (index 2 when no conflicts)
+      }
+    } catch {
+      toast.error("Failed to check for duplicates");
+    }
+  };
+
+  const handleConflictActionChange = (rowIndex: number, action: ConflictAction) => {
+    setConflictActions((prev) => ({ ...prev, [rowIndex]: action }));
+  };
+
+  const handleApplyAllConflicts = (action: ConflictAction) => {
+    const updated: Record<number, ConflictAction> = {};
+    for (const dup of duplicates) {
+      updated[dup.row_index] = action;
+    }
+    setConflictActions(updated);
+  };
+
   const handleConfirm = async () => {
     const validRows = allRows.filter((r) => r.symbol && r.quantity > 0);
     if (validRows.length === 0) {
@@ -213,13 +300,45 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
       return;
     }
     try {
-      // Use broker from the first active group, or fallback
+      // Build actions array
+      let actions: RowAction[] | undefined;
+      if (duplicates.length > 0) {
+        const dupMap = new Map(duplicates.map((d) => [d.row_index, d]));
+        actions = validRows.map((_, i) => {
+          const dup = dupMap.get(i);
+          if (dup) {
+            const conflictAction = conflictActions[i] || "merge";
+            return {
+              action: conflictAction,
+              existing_holding_id: dup.existing.id,
+            };
+          }
+          return { action: "create" as const };
+        });
+      }
+
       const primaryBroker =
         activeGroups.find((g) => g.broker)?.broker || broker || "csv";
-      await confirmImport(validRows, primaryBroker);
-      setImportedCount(validRows.length);
+      await confirmImport(validRows, primaryBroker, actions);
+
+      if (conflictSummary) {
+        setImportSummary(conflictSummary);
+        setImportedCount(conflictSummary.created + conflictSummary.merged + conflictSummary.replaced);
+        if (conflictSummary.skipped === validRows.length) {
+          toast.success("All holdings skipped — no changes made");
+        } else {
+          const parts: string[] = [];
+          if (conflictSummary.created > 0) parts.push(`${conflictSummary.created} added`);
+          if (conflictSummary.merged > 0) parts.push(`${conflictSummary.merged} merged`);
+          if (conflictSummary.replaced > 0) parts.push(`${conflictSummary.replaced} replaced`);
+          if (conflictSummary.skipped > 0) parts.push(`${conflictSummary.skipped} skipped`);
+          toast.success(parts.join(", "));
+        }
+      } else {
+        setImportedCount(validRows.length);
+        toast.success("Import complete!");
+      }
       setDone(true);
-      toast.success("Import complete!");
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Import failed");
     }
@@ -233,10 +352,10 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
       className="max-w-4xl max-h-[85vh] overflow-y-auto"
     >
       {done ? (
-        <SuccessState count={importedCount} onClose={handleClose} />
+        <SuccessState count={importedCount} onClose={handleClose} summary={importSummary} />
       ) : (
         <>
-          <StepIndicator steps={STEPS} current={step} />
+          <StepIndicator steps={steps} current={step} />
 
           {step === 0 && (
             <div className="space-y-5">
@@ -550,8 +669,9 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
                 </Button>
                 <Button
                   size="lg"
-                  onClick={() => setStep(2)}
+                  onClick={handleCheckDuplicates}
                   disabled={allRows.length === 0}
+                  loading={checkingDuplicates}
                 >
                   Next
                 </Button>
@@ -559,7 +679,39 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
             </div>
           )}
 
-          {step === 2 && (
+          {/* Conflict resolution step (only when hasConflicts) */}
+          {step === conflictStep && hasConflicts && (
+            <div>
+              {checkingDuplicates ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-brand-lime" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Checking for existing holdings...
+                  </p>
+                </div>
+              ) : (
+                <ConflictResolutionStep
+                  duplicates={duplicates}
+                  actions={conflictActions}
+                  onActionChange={handleConflictActionChange}
+                  onApplyAll={handleApplyAllConflicts}
+                />
+              )}
+              <div className="flex justify-between mt-6">
+                <Button variant="outline" size="lg" onClick={() => setStep(1)}>
+                  Back
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => setStep(3)}
+                >
+                  Continue
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === confirmStepIdx && (
             <div>
               {duplicateList.length > 0 && (
                 <div className="flex items-start gap-3 rounded-card border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 mb-4">
@@ -570,14 +722,30 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
                 </div>
               )}
 
-              <ReviewTable rows={allRows} duplicateSymbols={duplicateSymbols} />
+              {hasConflicts && duplicates.length > 0 && (
+                <div className="flex items-start gap-3 rounded-card border border-brand-lime/30 bg-brand-lime/5 px-4 py-3 mb-4">
+                  <AlertTriangle className="w-5 h-5 text-brand-lime shrink-0 mt-0.5" />
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {duplicates.filter((d) => conflictActions[d.row_index] === "merge").length} to merge,{" "}
+                    {duplicates.filter((d) => conflictActions[d.row_index] === "skip").length} to skip,{" "}
+                    {duplicates.filter((d) => conflictActions[d.row_index] === "replace").length} to replace
+                  </p>
+                </div>
+              )}
+
+              <ReviewTable rows={allRows} duplicateSymbols={duplicateSymbols} skippedIndices={skippedIndices} />
 
               <div className="flex justify-between mt-6">
-                <Button variant="outline" size="lg" onClick={() => setStep(1)}>
+                <Button variant="outline" size="lg" onClick={() => setStep(hasConflicts ? 2 : 1)}>
                   Back
                 </Button>
                 <Button size="lg" onClick={handleConfirm} loading={confirming}>
-                  Import {allRows.length} Holdings
+                  {conflictSummary
+                    ? conflictSummary.skipped === allRows.filter((r) => r.symbol && r.quantity > 0).length
+                      ? "Confirm — All Skipped"
+                      : `Confirm Import (${conflictSummary.created + conflictSummary.merged + conflictSummary.replaced} holdings)`
+                    : `Import ${allRows.length} Holdings`
+                  }
                 </Button>
               </div>
             </div>

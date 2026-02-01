@@ -9,9 +9,10 @@ from app.models.signal import Signal
 from app.models.report import Report
 from app.models.goal import Goal
 from app.models.currency import Currency, ExchangeRate
+from app.models.price_history import PriceHistory
 
 __all__ = [
     "User", "RiskProfile", "AssetClass", "Holding", "Transaction",
     "BrokerConnection", "MarketData", "Signal", "Report", "Goal",
-    "Currency", "ExchangeRate",
+    "Currency", "ExchangeRate", "PriceHistory",
 ]
