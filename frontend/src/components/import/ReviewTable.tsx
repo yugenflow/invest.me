@@ -43,8 +43,8 @@ export default function ReviewTable({ rows, duplicateSymbols, assetClassCode = "
     return null;
   };
 
-  const formatCell = (row: ImportRow, col: { key: string; type: string; align?: string }) => {
-    const val = (row as Record<string, unknown>)[col.key];
+  const formatCell = (row: ImportRow, col: { key: string; type: string; align?: string }): React.ReactNode => {
+    const val = row[col.key];
     if (col.type === "number" && col.key === "amount_invested") {
       return formatCurrency(val as number, row.buy_currency);
     }

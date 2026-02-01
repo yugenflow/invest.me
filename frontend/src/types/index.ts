@@ -123,6 +123,7 @@ export interface CsvPreviewRow {
 }
 
 export interface ImportRow {
+  [key: string]: string | number | undefined;
   symbol: string;
   name: string;
   quantity: number;

@@ -60,10 +60,6 @@ export default function PerformanceChart({ data, viewMode }: PerformanceChartPro
   const hasCategoryData = categories.length > 0;
   const hasBenchmarkData = benchmarks.length > 0;
 
-  if (!portfolioData.length) {
-    return <div className="text-center text-gray-500 dark:text-gray-400 py-8">No performance data</div>;
-  }
-
   // Build merged dataset for by-category view
   const categoryChartData = useMemo(() => {
     if (!hasCategoryData) return [];
@@ -98,6 +94,10 @@ export default function PerformanceChart({ data, viewMode }: PerformanceChartPro
       String(a.date).localeCompare(String(b.date))
     );
   }, [perfData.benchmarks, portfolioData, hasBenchmarkData]);
+
+  if (!portfolioData.length) {
+    return <div className="text-center text-gray-500 dark:text-gray-400 py-8">No performance data</div>;
+  }
 
   const tickFormatter = (val: string) => {
     const d = new Date(val);
