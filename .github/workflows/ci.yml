@@ -64,4 +64,4 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
-      - run: pytest -v --tb=long
+      - run: pytest -v --tb=short
