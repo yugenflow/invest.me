@@ -1,4 +1,3 @@
-import asyncio
 import pytest
 import uuid
 from typing import AsyncGenerator
@@ -30,13 +29,6 @@ async def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 SEED_ASSET_CLASSES = [

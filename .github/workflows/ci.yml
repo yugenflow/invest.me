@@ -68,7 +68,7 @@ jobs:
         run: |
           pytest -v --tb=short 2>&1 | tee test-output.txt
           exit ${PIPESTATUS[0]}
-      - name: Post test results to summary
+      - name: Test results summary
         if: always()
         run: |
           echo '```' >> $GITHUB_STEP_SUMMARY
