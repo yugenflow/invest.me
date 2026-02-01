@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 import uuid
 from typing import AsyncGenerator
@@ -29,6 +30,14 @@ async def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Single event loop for all tests — prevents 'Future attached to different loop' errors."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 SEED_ASSET_CLASSES = [
@@ -77,9 +86,8 @@ async def create_tables():
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         _db_available = True
-        print("\n[conftest] DB tables created successfully")
-    except Exception as e:
-        print(f"\n[conftest] DB not available, skipping table creation: {e}")
+    except Exception:
+        pass  # DB not available — integration tests will fail, unit tests still run
 
     if _db_available:
         try:
@@ -91,9 +99,8 @@ async def create_tables():
                     if not existing.scalar_one_or_none():
                         session.add(AssetClass(**ac_data))
                 await session.commit()
-            print("[conftest] Asset classes seeded successfully")
-        except Exception as e:
-            print(f"[conftest] Failed to seed asset classes: {e}")
+        except Exception:
+            pass
 
     yield
 
