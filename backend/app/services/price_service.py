@@ -238,6 +238,28 @@ async def resolve_price(
     }
 
 
+def get_previous_close_from_history(conn, ticker: str) -> float | None:
+    """Query price_history for the most recent close before today (sync, psycopg2).
+
+    Used by the MF NAV task to get a real previous_close since Yahoo's
+    chartPreviousClose returns the same value as regularMarketPrice for MF tickers.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT close FROM price_history
+                WHERE symbol = %s AND date < CURRENT_DATE
+                ORDER BY date DESC
+                LIMIT 1
+            """, (ticker,))
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                return round(float(row[0]), 2)
+    except Exception as e:
+        logger.warning(f"Failed to get previous close from history for {ticker}: {e}")
+    return None
+
+
 def _is_nan(val) -> bool:
     try:
         return math.isnan(float(val))

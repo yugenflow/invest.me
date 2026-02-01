@@ -4,6 +4,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
@@ -14,6 +15,7 @@ from app.services.price_service import (
     to_yfinance_ticker,
     fetch_current_prices_batch,
     fetch_eod_history,
+    get_previous_close_from_history,
     PRICEABLE_CLASSES,
 )
 from app.services.mf_resolver import resolve_mf_ticker_sync_cached
@@ -33,6 +35,57 @@ _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 _CACHE_TTL = int(os.getenv("PRICE_CACHE_TTL_SECONDS", "900"))
 _BATCH_SIZE = int(os.getenv("YFINANCE_BATCH_SIZE", "50"))
 _BACKFILL_DAYS = int(os.getenv("PRICE_HISTORY_BACKFILL_DAYS", "365"))
+_MF_CACHE_TTL = 86400  # 24 hours for MF NAV prices
+
+# Market groups: maps asset class codes to scheduling groups
+_MARKET_GROUPS = {
+    "EQUITY_IN": "INDIA",
+    "GOLD_ETF": "INDIA",
+    "EQUITY_US": "US",
+    "CRYPTO": "ALWAYS",
+    "MUTUAL_FUND": "MF_DAILY",  # Excluded from 15-min task, handled by dedicated daily task
+}
+
+# Benchmark tickers mapped to market groups
+_BENCHMARK_MARKET_GROUPS = {
+    "^NSEI": "INDIA",
+    "^BSESN": "INDIA",
+    "^GSPC": "US",
+    "GC=F": "US",
+    "BTC-INR": "ALWAYS",
+}
+
+
+def _is_market_open(group: str) -> bool:
+    """Check if a market group should be fetched right now.
+
+    INDIA: Mon-Fri, 8:45 AM - 4:00 PM IST (with 30-min buffer → 8:15 - 16:30)
+    US: Mon-Fri, 9:00 AM - 4:30 PM ET (with 30-min buffer → 8:30 - 17:00)
+    ALWAYS: Always returns True (crypto, 24/7)
+    MF_DAILY: Always returns False (handled by dedicated daily task)
+    """
+    if group == "ALWAYS":
+        return True
+    if group == "MF_DAILY":
+        return False
+
+    now_utc = datetime.now(ZoneInfo("UTC"))
+
+    if group == "INDIA":
+        now_ist = now_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+        if now_ist.weekday() >= 5:  # Saturday=5, Sunday=6
+            return False
+        hour_min = now_ist.hour * 60 + now_ist.minute
+        return (8 * 60 + 15) <= hour_min <= (16 * 60 + 30)
+
+    if group == "US":
+        now_et = now_utc.astimezone(ZoneInfo("America/New_York"))
+        if now_et.weekday() >= 5:
+            return False
+        hour_min = now_et.hour * 60 + now_et.minute
+        return (8 * 60 + 30) <= hour_min <= (17 * 60)
+
+    return False
 
 
 def _get_sync_db():
@@ -162,19 +215,47 @@ def _ticker_has_history_sync(ticker: str) -> bool:
 
 @celery.task(name="fetch_current_prices")
 def fetch_current_prices():
-    """Fetch current prices for all held priceable tickers. Runs every 15 minutes."""
+    """Fetch current prices for open-market tickers only. Runs every 15 minutes.
+
+    Partitions tickers by market group and skips closed markets.
+    MF tickers are always excluded (handled by fetch_mf_nav daily task).
+    """
     ticker_info = _get_all_tickers_sync()
     if not ticker_info:
         logger.info("No priceable tickers found.")
         return
 
-    yf_tickers = [t["yf_ticker"] for t in ticker_info]
-    logger.info(f"Fetching current prices for {len(yf_tickers)} tickers")
+    # Partition tickers by market group, filter to open markets only
+    open_tickers = []
+    skipped_groups = set()
+    for t in ticker_info:
+        group = _MARKET_GROUPS.get(t["asset_class_code"], "ALWAYS")
+        if _is_market_open(group):
+            open_tickers.append(t["yf_ticker"])
+        else:
+            skipped_groups.add(group)
+
+    # Also include benchmark tickers for open markets
+    for bench in BENCHMARK_TICKERS:
+        group = _BENCHMARK_MARKET_GROUPS.get(bench["yf_ticker"], "ALWAYS")
+        if _is_market_open(group):
+            open_tickers.append(bench["yf_ticker"])
+        else:
+            skipped_groups.add(group)
+
+    if skipped_groups:
+        logger.info(f"Skipped closed market groups: {', '.join(sorted(skipped_groups))}")
+
+    if not open_tickers:
+        logger.info("All markets closed, no tickers to fetch.")
+        return {"fetched": 0, "total": 0, "skipped_groups": list(skipped_groups)}
+
+    logger.info(f"Fetching current prices for {len(open_tickers)} tickers (open markets)")
 
     # Process in batches
     all_prices = {}
-    for i in range(0, len(yf_tickers), _BATCH_SIZE):
-        batch = yf_tickers[i:i + _BATCH_SIZE]
+    for i in range(0, len(open_tickers), _BATCH_SIZE):
+        batch = open_tickers[i:i + _BATCH_SIZE]
         prices = fetch_current_prices_batch(batch)
         all_prices.update(prices)
 
@@ -194,7 +275,7 @@ def fetch_current_prices():
     _upsert_market_data_sync(all_prices)
 
     logger.info(f"Cached and persisted prices for {len(all_prices)} tickers")
-    return {"fetched": len(all_prices), "total": len(yf_tickers)}
+    return {"fetched": len(all_prices), "total": len(open_tickers), "skipped_groups": list(skipped_groups)}
 
 
 BENCHMARK_TICKERS = [
@@ -318,3 +399,70 @@ def resolve_mf_symbols():
     finally:
         r.close()
         conn.close()
+
+
+@celery.task(name="fetch_mf_nav")
+def fetch_mf_nav():
+    """Fetch daily MF NAVs with corrected previous_close from price_history.
+
+    Runs once daily at 18:00 UTC (11:30 PM IST), after NAV declaration and
+    after the EOD task (16:30 UTC) has populated price_history.
+
+    Yahoo's chartPreviousClose returns the same value as regularMarketPrice for
+    MF tickers, so we override previous_close with the most recent close from
+    our price_history table to get correct day_change_pct.
+    """
+    ticker_info = _get_all_tickers_sync()
+    mf_tickers = [t for t in ticker_info if t["asset_class_code"] == "MUTUAL_FUND"]
+
+    if not mf_tickers:
+        logger.info("No MF tickers found.")
+        return {"fetched": 0}
+
+    yf_tickers = [t["yf_ticker"] for t in mf_tickers]
+    logger.info(f"Fetching MF NAVs for {len(yf_tickers)} tickers")
+
+    # Fetch current NAVs from Yahoo
+    all_prices = {}
+    for i in range(0, len(yf_tickers), _BATCH_SIZE):
+        batch = yf_tickers[i:i + _BATCH_SIZE]
+        prices = fetch_current_prices_batch(batch)
+        all_prices.update(prices)
+
+    if not all_prices:
+        logger.warning("No MF NAVs returned from yfinance.")
+        return {"fetched": 0}
+
+    # Override previous_close from price_history for correct day change
+    conn = _get_sync_db()
+    try:
+        fixed_count = 0
+        for ticker, data in all_prices.items():
+            hist_close = get_previous_close_from_history(conn, ticker)
+            if hist_close is not None:
+                data["previous_close"] = hist_close
+                current = data["price"]
+                if hist_close > 0:
+                    data["day_change_pct"] = round((current - hist_close) / hist_close * 100, 2)
+                else:
+                    data["day_change_pct"] = 0.0
+                fixed_count += 1
+            else:
+                # No history yet — keep Yahoo's values (day_change_pct may be 0)
+                logger.info(f"No price history for {ticker}, using Yahoo previous_close")
+    finally:
+        conn.close()
+
+    # Cache in Redis with 24-hour TTL (vs 15-min for other assets)
+    r = _get_sync_redis()
+    pipe = r.pipeline()
+    for ticker, data in all_prices.items():
+        pipe.setex(f"price:{ticker}", _MF_CACHE_TTL, json.dumps(data))
+    pipe.execute()
+    r.close()
+
+    # Persist to market_data table
+    _upsert_market_data_sync(all_prices)
+
+    logger.info(f"MF NAV fetch complete: {len(all_prices)} tickers, {fixed_count} with corrected previous_close")
+    return {"fetched": len(all_prices), "fixed_previous_close": fixed_count}

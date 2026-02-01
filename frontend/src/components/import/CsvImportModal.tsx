@@ -52,7 +52,7 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
   const [done, setDone] = useState(false);
   const [showFormatHelp, setShowFormatHelp] = useState(false);
-  const [formatTab, setFormatTab] = useState<"equity" | "crypto">("equity");
+  const [formatTab, setFormatTab] = useState<"equity" | "mutual_fund" | "crypto">("equity");
   const [parseError, setParseError] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
   const [importSummary, setImportSummary] = useState<{ created: number; merged: number; replaced: number; skipped: number } | undefined>();
@@ -402,6 +402,17 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
                     </button>
                     <button
                       type="button"
+                      onClick={() => setFormatTab("mutual_fund")}
+                      className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                        formatTab === "mutual_fund"
+                          ? "bg-brand-lime text-brand-black"
+                          : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      }`}
+                    >
+                      Indian Mutual Fund
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setFormatTab("crypto")}
                       className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors ${
                         formatTab === "crypto"
@@ -413,7 +424,18 @@ export default function CsvImportModal({ isOpen, onClose }: CsvImportModalProps)
                     </button>
                   </div>
 
-                  {formatTab === "equity" ? (
+                  {formatTab === "mutual_fund" ? (
+                    <>
+                      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+                        We&apos;re building support for importing mutual fund holdings from your <strong>CAS (Consolidated Account Statement)</strong> PDF — the standard statement from CAMS/KFintech.
+                      </p>
+                      <div className="rounded-lg bg-brand-lime/10 border border-brand-lime/20 px-4 py-3">
+                        <p className="text-xs text-brand-lime font-medium">
+                          CAS PDF import is coming soon. For now, use <strong>Manual Entry</strong> to add your mutual fund holdings — fund names are auto-resolved to live NAV tracking.
+                        </p>
+                      </div>
+                    </>
+                  ) : formatTab === "equity" ? (
                     <>
                       <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
                         Your CSV needs at least these <strong>3 columns</strong>. The column names can vary &mdash; we&apos;ll auto-detect them.

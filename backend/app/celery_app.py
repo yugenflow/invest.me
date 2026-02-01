@@ -24,5 +24,9 @@ celery.conf.update(
             "task": "fetch_eod_prices",
             "schedule": crontab(hour=16, minute=30),  # 16:30 UTC (after IN + US close)
         },
+        "fetch-mf-nav-daily": {
+            "task": "fetch_mf_nav",
+            "schedule": crontab(hour=18, minute=0),  # 18:00 UTC / 11:30 PM IST (after NAV declaration + EOD task)
+        },
     },
 )
