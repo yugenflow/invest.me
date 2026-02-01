@@ -1,7 +1,7 @@
 # Invest.me — Project Documentation
 
-**Version:** 1.0.0-alpha
-**Last updated:** 2026-01-30
+**Version:** 1.1.0-beta
+**Last updated:** 2026-02-01
 
 ---
 
@@ -28,13 +28,16 @@
 
 **Invest.me** is a full-stack investment portfolio management platform designed for Indian retail investors. It enables users to:
 
-- Track holdings across 15+ asset classes (equities, mutual funds, crypto, gold, FDs, PPF, NPS, real estate, bonds, etc.)
-- Import portfolio data from broker CSVs (Upstox, Zerodha, Groww auto-detected)
+- Track holdings across 12 beta-scoped asset classes (Indian equities, mutual funds, gold variants, FDs, PPF, EPF, NPS, bonds, real estate)
+- Import portfolio data from broker CSVs (Zerodha, Upstox, Kotak Neo auto-detected + fuzzy fallback for other brokers)
+- View live market prices for equities and MF NAVs via yfinance + Redis caching
+- Auto-resolve mutual fund names to Yahoo Finance tickers (via mfapi.in → ISIN → Yahoo search)
+- Detect and resolve duplicate holdings during import (merge, replace, or skip)
 - Visualize portfolio performance, asset allocation, and top holdings
 - Complete a risk profiling questionnaire to receive a personalized risk score and persona
 - Manage account settings and subscription plans
 
-The platform is in active development with AI-powered features (smart advisor, market intelligence, rebalancing, sentiment analysis) on the roadmap.
+The platform is in active beta with AI-powered features (smart advisor, market intelligence, rebalancing, sentiment analysis) on the roadmap.
 
 ---
 
@@ -49,10 +52,10 @@ The platform is in active development with AI-powered features (smart advisor, m
                                            │
                               ┌────────────┼────────────┐
                               │            │            │
-                         ┌────▼────┐  ┌────▼────┐  ┌───▼────┐
-                         │PostgreSQL│  │  Redis  │  │ Celery │
-                         │   :5432  │  │  :6379  │  │ Worker │
-                         └─────────┘  └─────────┘  └────────┘
+                         ┌────▼────┐  ┌────▼────┐  ┌───▼────────┐
+                         │PostgreSQL│  │  Redis  │  │   Celery   │
+                         │   :5432  │  │  :6379  │  │Worker+Beat │
+                         └─────────┘  └─────────┘  └────────────┘
 ```
 
 **Request flow:**
@@ -60,8 +63,10 @@ The platform is in active development with AI-powered features (smart advisor, m
 2. Axios client sends REST requests to FastAPI with JWT bearer token
 3. FastAPI validates token, processes request via service layer
 4. SQLAlchemy async ORM reads/writes PostgreSQL
-5. Redis handles token blacklisting and caching
-6. Celery handles background tasks (future: market data fetching)
+5. Redis handles token blacklisting, price caching, and MF resolution caching
+6. Celery Worker handles background tasks (MF symbol resolution, on-demand price refresh)
+7. Celery Beat runs scheduled tasks (current prices every 15 min, EOD prices daily at 16:30 UTC, MF NAVs daily at 18:00 UTC)
+8. Price Service resolves prices via 3-tier fallback: Redis cache → price_history table → cost basis
 
 **All services orchestrated via Docker Compose.**
 
@@ -99,6 +104,7 @@ The platform is in active development with AI-powered features (smart advisor, m
 | passlib + bcrypt | 1.7.4 / 4.2.1 | Password hashing |
 | redis | 5.2.1 | Async Redis client |
 | celery | 5.4.0 | Background task queue |
+| yfinance | 0.2.x | Market data (prices, NAVs, OHLCV) |
 | pandas | 2.2.3 | CSV/data processing |
 | pytest | 8.3.4 | Testing framework |
 
@@ -107,7 +113,8 @@ The platform is in active development with AI-powered features (smart advisor, m
 | Service | Version | Purpose |
 |---------|---------|---------|
 | PostgreSQL | 16-Alpine | Primary database |
-| Redis | 7-Alpine | Token blacklist, caching, Celery broker |
+| Redis | 7-Alpine | Token blacklist, price cache, MF resolution cache, Celery broker |
+| Celery Beat | — | Scheduled task runner (price fetching, NAV updates) |
 | Docker Compose | — | Container orchestration |
 
 ---
@@ -209,7 +216,7 @@ The frontend uses Next.js App Router with route groups for layout separation:
 | Path | Component | Status |
 |------|-----------|--------|
 | `/dashboard` | Portfolio overview — net worth, gains, allocation donut, performance line chart, top holdings, holdings table | Fully built |
-| `/import` | CSV upload (drag-drop, broker auto-detect, column mapping, preview) + manual entry modal | Fully built |
+| `/import` | Multi-file CSV upload (drag-drop, broker auto-detect, column mapping, preview, duplicate detection, conflict resolution) + manual entry modal (12 beta asset classes, 3-step MF flow) + "How to import" guide | Fully built |
 | `/advisor` | Smart Advisor — AI-powered investment recommendations | Coming Soon placeholder |
 | `/market-intel` | Market Intelligence — news, analysis, sector insights, red flags | Coming Soon placeholder |
 | `/rebalance` | Rebalance Suggestions — AI-driven portfolio rebalancing | Coming Soon placeholder |
@@ -236,7 +243,7 @@ The frontend uses Next.js App Router with route groups for layout separation:
 
 | Component | Description |
 |-----------|-------------|
-| `Sidebar` | Collapsible nav (280px → 64px). 9 nav items, "Upgrade to Pro" card, user profile footer |
+| `Sidebar` | Collapsible nav (280px → 64px). 9 nav items, "Upgrade to Pro" card, user profile footer. Beta badge next to logo opens modal showing supported features + coming-soon roadmap |
 | `TopBar` | Breadcrumb, search (future), theme toggle, notifications (future) |
 | `ThemeProvider` | next-themes wrapper with class strategy |
 | `ThemeToggle` | Sun/Moon icon toggle |
@@ -266,8 +273,9 @@ The frontend uses Next.js App Router with route groups for layout separation:
 ```typescript
 interface AuthState {
   accessToken: string | null;
+  refreshToken: string | null;
   user: UserProfile | null;
-  setAuth: (token: string, user: UserProfile) => void;
+  setAuth: (accessToken: string, refreshToken: string, user: UserProfile) => void;
   setToken: (token: string) => void;
   logout: () => void;
 }
@@ -303,23 +311,30 @@ backend/
 │   │   ├── user.py          # User, RiskProfile, Goal
 │   │   ├── holding.py       # Holding, Transaction
 │   │   ├── asset_class.py   # AssetClass enum/table
+│   │   ├── price_history.py # OHLCV price history (yfinance data)
 │   │   ├── signal.py        # Market signals
 │   │   └── ...
 │   ├── routes/              # API endpoints
 │   │   ├── auth.py          # /auth/*
 │   │   ├── users.py         # /users/*
 │   │   ├── onboarding.py    # /onboarding/*
-│   │   ├── holdings.py      # /holdings/*
+│   │   ├── holdings.py      # /holdings/* (+ duplicates, merge, bulk-delete)
 │   │   ├── transactions.py  # /transactions/*
 │   │   ├── asset_classes.py # /asset_classes/*
 │   │   ├── portfolio.py     # /portfolio/*
 │   │   ├── dashboard.py     # /dashboard/*
-│   │   └── imports.py       # /import/*
+│   │   ├── imports.py       # /import/* (+ check-duplicates, resolve-mf, resolve-isin)
+│   │   └── prices.py        # /prices/* (manual refresh, cache status)
+│   ├── tasks/
+│   │   └── price_tasks.py   # Celery tasks: current prices, EOD, MF NAV, MF resolution
 │   └── services/
 │       ├── auth_service.py      # Signup, login, token management
-│       ├── portfolio_service.py # Aggregation, allocation, performance
+│       ├── portfolio_service.py # Aggregation, allocation, performance (uses live prices)
 │       ├── risk_engine.py       # Risk score calculation
-│       └── csv_parser.py        # CSV parsing, broker detection
+│       ├── csv_parser.py        # CSV parsing, broker detection (Zerodha, Upstox, Kotak Neo + fuzzy)
+│       ├── price_service.py     # 3-tier price resolution, yfinance batch fetch, Redis caching
+│       ├── mf_resolver.py       # MF name → mfapi.in → ISIN → Yahoo Finance ticker resolution
+│       └── duplicate_service.py # Duplicate detection, merge computation
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_onboarding.py
@@ -340,9 +355,9 @@ backend/
 - Logout (token blacklisting)
 
 **portfolio_service.py:**
-- `get_summary()` — total invested, current value, gains, XIRR (planned)
-- `get_allocation()` — holdings grouped by asset class with percentages
-- `get_performance()` — time-series data points for charting
+- `get_summary()` — total invested, current value (live prices), gains, XIRR (planned)
+- `get_allocation()` — holdings grouped by asset class with percentages (uses live prices)
+- `get_performance()` — time-series data points for charting (uses price_history for historical values)
 - `get_dashboard()` — aggregated response (summary + allocation + performance + top holdings)
 
 **risk_engine.py:**
@@ -354,10 +369,30 @@ backend/
 - Output: risk score (1–10), risk persona (Conservative / Moderate Conservative / Moderate / Moderate Aggressive / Aggressive)
 
 **csv_parser.py:**
-- Auto-detects broker format from file headers (Upstox, Zerodha, Groww, etc.)
-- Parses CSV with pandas (handles BOM encoding, multi-line headers)
+- Auto-detects broker format from file headers (Zerodha, Upstox, Kotak Neo + fuzzy fallback for other formats)
+- Parses CSV with pandas (handles BOM encoding, multi-line headers, summary row filtering)
+- Fuzzy fallback: promotes `name` column to `symbol` when no explicit symbol column exists
 - Returns structured preview for user confirmation
 - On confirm: creates Holding + corresponding buy Transaction per row
+
+**price_service.py:**
+- `to_yfinance_ticker()` — maps holding symbols to Yahoo Finance tickers (.NS/.BO for Indian, -INR for crypto, 0P...BO for MF)
+- `resolve_price()` — 3-tier fallback: Redis cache → price_history table → cost basis
+- `fetch_current_prices_batch()` — batch fetches current prices from yfinance
+- `fetch_eod_history()` — fetches OHLCV history for specified period
+- Priceable classes: EQUITY_IN, EQUITY_US, CRYPTO, GOLD_ETF, MUTUAL_FUND
+- Cost-basis classes: FD, PPF, EPF, NPS, BOND, REAL_ESTATE, GOLD_PHYSICAL, GOLD_SGB, GOLD_DIGITAL
+
+**mf_resolver.py:**
+- `resolve_mf_ticker()` — async resolution chain: fund name → mfapi.in search → ISIN → Yahoo Finance ticker
+- Redis-cached with 7-day TTL (key: `mf_resolve:{normalized_name}`)
+- Returns `{yf_ticker, isin, amfi_code, matched_name}` or None
+- Sync variant available for Celery tasks
+
+**duplicate_service.py:**
+- `find_duplicate_holding()` — finds existing holding matching incoming data (symbol-based for equities/MF, name-based for FD/PPF/EPF/NPS/RE/Other)
+- `get_duplicate_groups()` — groups holdings with same symbol + asset class
+- `compute_merge()` — calculates merged quantity and weighted average price
 
 ---
 
@@ -404,6 +439,12 @@ User (1) ──── (1) RiskProfile
 **AssetClass:**
 - code (PK), name, category, description
 
+**PriceHistory:**
+- id (UUID PK), symbol (Yahoo Finance ticker), asset_class_code
+- date, open, high, low, close (NOT NULL), volume
+- Unique constraint: (symbol, date)
+- created_at
+
 ### Supported Asset Classes
 
 | Code | Name | Category |
@@ -424,9 +465,11 @@ User (1) ──── (1) RiskProfile
 | BOND | Bonds | Fixed Income |
 | OTHER | Other | Other |
 
+> **Beta note:** 12 asset classes are active in beta (EQUITY_IN through BOND). US Equity (EQUITY_US), Cryptocurrency (CRYPTO), and Other (OTHER) are hidden from the manual entry dropdown but remain in the database for future use.
+
 ### Migrations
 
-Managed via Alembic. Initial migration: `001_initial.py`.
+Managed via Alembic. Migrations: `001_initial.py`, `002_add_price_history.py`.
 
 ```bash
 # Generate new migration
@@ -603,30 +646,48 @@ Glass:     Same + 80% opacity + backdrop-blur-sm
 
 **Route:** `/dashboard`
 
-- **Net Worth Card** — Total portfolio value, total invested, total gain/loss (absolute + percentage)
+- **Net Worth Card** — Total portfolio value (live market prices), total invested, total gain/loss (absolute + percentage)
 - **Stat Cards** — Best performer, worst performer, number of holdings
-- **Allocation Donut Chart** — Asset class breakdown (Recharts PieChart)
-- **Performance Line Chart** — Portfolio value over time with range selector (30d/90d/180d/1yr)
-- **Top Holdings** — Top 5 by current value
-- **Holdings Table** — Full sortable table with asset class badges, actions (edit/delete)
+- **Allocation Donut Chart** — Asset class breakdown using live prices (Recharts PieChart)
+- **Performance Line Chart** — Portfolio value over time with range selector (30d/90d/180d/1yr), uses price_history for historical values
+- **Top Holdings** — Top 5 by current value (live prices)
+- **Holdings Table** — Full sortable table with asset class badges, actions (edit/delete), search filter
 
 ### 10.4 Import Holdings (Fully Built)
 
 **Route:** `/import`
 
+**Page features:**
+- Collapsible "How to import" guide — 3-column layout covering Indian Equity CSV, Mutual Fund manual entry, and other asset classes (collapsed by default)
+- CSV format help with tabs: Indian Equity (Zerodha, Upstox, Kotak Neo formats), Indian Mutual Fund (CAS PDF — coming soon), Crypto (coming soon)
+
 Two methods:
 
-**CSV Import:**
-1. Drag & drop or browse file upload
-2. Auto-detects broker (Upstox, Zerodha, Groww, etc.)
+**CSV Import (multi-file):**
+1. Drag & drop or browse — supports multiple files in one upload
+2. Auto-detects broker (Zerodha, Upstox, Kotak Neo + fuzzy fallback for unrecognized formats)
 3. Column mapping UI — user maps CSV columns to app fields
 4. Editable preview table — inline editing before confirm
-5. Confirm → bulk creates holdings + buy transactions
+5. Duplicate detection — checks against existing holdings, shows conflicts
+6. Conflict resolution step — per-holding choice: Create New / Merge (weighted avg) / Replace / Skip
+7. Confirm → bulk creates holdings + buy transactions
 
-**Manual Entry:**
-- Spreadsheet-style modal
-- Fields: symbol, name, asset class, quantity, avg buy price, date
-- Add multiple rows before submitting
+**Manual Entry (12 beta-scoped asset classes):**
+- Spreadsheet-style modal with asset class dropdown (Indian Equity, Indian MF, Gold variants, FD, PPF, EPF, NPS, Bonds, Real Estate)
+- **Indian Mutual Fund — 3-step flow:** Entry → Resolve → Confirm
+  - Step 1: Enter fund name, units, amount invested (derives NAV)
+  - Step 2: Batch MF resolution via `POST /import/resolve-mf`; failed resolutions show ISIN input for manual fallback via `POST /import/resolve-isin`
+  - Step 3: Review resolved holdings and confirm
+- **Gold Physical/Digital:** simplified form — Total Cost instead of price/gram
+- **Gold SGB:** Total Cost instead of issue price (defaults interest rate 2.5%)
+- **All other asset classes:** standard 2-step flow (Entry → Confirm)
+- No MF holding gets created without a resolved Yahoo Finance symbol
+
+**New import components:**
+- `MfResolveStep` — MF resolution UI with progress and manual ISIN fallback
+- `ConflictResolutionStep` — duplicate conflict resolution UI
+- `SuccessState` — success confirmation with import summary
+- `StepIndicator` — visual step counter for multi-step flows
 
 ### 10.5 Settings (Fully Built)
 
@@ -661,6 +722,37 @@ All use the `ComingSoon` placeholder component:
 | Sentiment Index | Market sentiment tracking and analysis | `/sentiment` |
 | Expert Opinion | Curated insights from market experts and analysts | `/expert-opinion` |
 | New Avenues | IPO alerts, new fund launches, alternative investment opportunities | `/new-avenues` |
+
+### 10.8 Live Market Data (Fully Built — Backend)
+
+**No dedicated frontend page** — prices are consumed by the dashboard and portfolio services.
+
+**Architecture:**
+- **yfinance** fetches current prices and OHLCV history from Yahoo Finance
+- **Redis** caches current prices (15-min TTL for equities, 24h for MF NAVs)
+- **Celery Beat** schedules recurring tasks:
+  - `fetch_current_prices` — every 15 minutes (skips closed markets)
+  - `fetch_eod_prices` — daily at 16:30 UTC (OHLCV + 1-year backfill for new tickers)
+  - `fetch_mf_nav` — daily at 18:00 UTC
+- **3-tier price fallback:** Redis cache → price_history table → cost basis (avg_buy_price)
+
+**Market-aware scheduling:**
+- India: Mon–Fri, 8:15 AM – 4:30 PM IST (with 30-min buffer)
+- US: Mon–Fri, 8:30 AM – 5:00 PM ET (with 30-min buffer)
+- Crypto: 24/7
+- MF NAVs: dedicated daily task (not part of 15-min cycle)
+
+**MF Resolver chain:** Fund name → mfapi.in search → ISIN → Yahoo Finance search → 0P...BO ticker code. Redis-cached with 7-day TTL. Auto-resolves on holding creation and CSV import confirm. Batch resolution available via `resolve_mf_symbols` Celery task.
+
+**Benchmark tickers tracked:** ^NSEI (Nifty 50), ^BSESN (Sensex), ^GSPC (S&P 500), GC=F (Gold futures), BTC-INR (Bitcoin)
+
+### 10.9 Beta Info Modal
+
+**Trigger:** "Beta" badge pill next to logo in sidebar (both collapsed and expanded states)
+
+**Modal contents:**
+- **Currently Supported** (green checkmarks): Indian Equity CSV import (Zerodha, Upstox, Kotak Neo), Indian MF manual entry with auto-resolution + live NAV, Gold (4 variants), FD, PPF, EPF, NPS, Bonds, Real Estate — manual entry with cost basis tracking
+- **Coming Soon** (grey indicators): MF CAS PDF import, Crypto CSV import, Broker API connectors, US Equity & Crypto live pricing, Smart Advisor, Market Intel, Sentiment Index, New Avenues
 
 ---
 
@@ -701,6 +793,9 @@ Base URL: `http://localhost:8000/api/v1`
 | GET | `/holdings/{id}` | Get single holding | Bearer |
 | PATCH | `/holdings/{id}` | Update holding | Bearer |
 | DELETE | `/holdings/{id}` | Soft-delete holding | Bearer |
+| GET | `/holdings/duplicates` | List groups of duplicate holdings | Bearer |
+| POST | `/holdings/merge-duplicates` | Merge each duplicate group (keeps oldest, deactivates rest) | Bearer |
+| POST | `/holdings/bulk-delete` | Soft-delete multiple holdings by ID | Bearer |
 
 ### Asset Classes
 
@@ -726,8 +821,18 @@ Base URL: `http://localhost:8000/api/v1`
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| POST | `/import/csv` | Upload CSV, returns preview | Bearer |
-| POST | `/import/csv/confirm` | Confirm and import holdings | Bearer |
+| POST | `/import/csv` | Upload CSV, returns preview (broker auto-detect) | Bearer |
+| POST | `/import/check-duplicates` | Check which import rows conflict with existing holdings | Bearer |
+| POST | `/import/csv/confirm` | Confirm and import holdings (with conflict resolution) | Bearer |
+| POST | `/import/resolve-mf` | Batch resolve MF fund names to Yahoo Finance tickers | Bearer |
+| POST | `/import/resolve-isin` | Resolve single ISIN to Yahoo Finance ticker | Bearer |
+
+### Prices
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| POST | `/prices/refresh` | Manually trigger price refresh task | Bearer |
+| GET | `/prices/status` | Check cache warmth and last update time | Bearer |
 
 ---
 
@@ -766,11 +871,12 @@ No test setup yet. Planned: Vitest + React Testing Library.
 
 ```yaml
 services:
-  db:         PostgreSQL 16-Alpine, port 5432, persistent volume
-  redis:      Redis 7-Alpine, port 6379
-  backend:    FastAPI app, port 8000, depends on db + redis
-  celery-worker: Celery process, depends on db + redis
-  frontend:   Next.js standalone, port 3000, depends on backend
+  db:            PostgreSQL 16-Alpine, port 5432, persistent volume
+  redis:         Redis 7-Alpine, port 6379
+  backend:       FastAPI app, port 8000, depends on db + redis
+  celery-worker: Celery worker process, depends on db + redis
+  celery-beat:   Celery beat scheduler (price fetching, NAV updates), depends on db + redis
+  frontend:      Next.js standalone, port 3000, depends on backend
 ```
 
 ```bash
@@ -802,10 +908,15 @@ docker-compose exec backend python scripts/seed_asset_classes.py
 - [x] Risk profiling and onboarding
 - [x] Portfolio dashboard with charts
 - [x] Holdings management (CRUD)
-- [x] CSV import with broker detection
-- [x] Manual entry
+- [x] CSV import with broker detection (Zerodha, Upstox, Kotak Neo + fuzzy fallback)
+- [x] Multi-file CSV upload with duplicate detection and conflict resolution
+- [x] Manual entry (12 beta-scoped asset classes, 3-step MF flow)
+- [x] MF name → Yahoo Finance ticker auto-resolution (mfapi.in → ISIN → Yahoo)
+- [x] Live market prices (yfinance + Redis cache + Celery Beat scheduled tasks)
 - [x] User settings
 - [x] Subscription pricing UI
+- [x] Beta info modal (sidebar badge with supported features / coming-soon roadmap)
+- [x] "How to import" guide on import page
 - [x] Dark mode
 - [x] Responsive design
 
@@ -832,6 +943,7 @@ docker-compose exec backend python scripts/seed_asset_classes.py
 ### Phase 5 - Additional Features
 - [ ] Flexible grid for portfolio => allow user to drag and drop stats, metrics, change dashboard layout
 - [ ] AI-chatbot for all things that a user may require to do on the platform
+- [ ] Smart Upload => Usesr uploads all files (csv, excel), account statements (pdf) that he has and let's us do the thing. Smart Upload will sort through all files, understand their structure, parse and extract holdings data (equities, mutual funds) and then directly take the user to the review screen to review all holdings identififed to import. 
 
 
 ---
@@ -857,5 +969,25 @@ docker-compose exec backend python scripts/seed_asset_classes.py
 - CSV format help section now has Indian Equity / Crypto asset class toggle with per-class column tables
 - Crypto tab shows expected headers with "coming soon" banner (parser not yet implemented)
 
+### 2026-02-01
+- Live Market Data: yfinance-based price fetching with 3-tier fallback (Redis cache → price_history → cost basis)
+- Celery Beat scheduler: current prices every 15 min, EOD OHLCV daily, MF NAV daily
+- New `price_history` model and migration (`002_add_price_history.py`)
+- Portfolio dashboard now uses live market prices for summary, allocation, performance, and top holdings
+- Mutual Fund name → Yahoo Finance ticker auto-resolution (mfapi.in → ISIN → Yahoo search, 7-day Redis cache)
+- Pre-import MF resolution with manual ISIN fallback (3-step flow: Entry → Resolve → Confirm)
+- Multi-file CSV upload support
+- Duplicate detection and conflict resolution during import (create / merge / replace / skip)
+- Added Kotak Neo CSV parser with broker signature detection
+- Fuzzy fallback for unrecognized CSV formats (name→symbol promotion, summary row filtering)
+- Simplified Manual Entry forms: MF derives NAV from units + amount; Gold uses Total Cost
+- Scoped manual entry to 12 beta asset classes (removed US Equity, Crypto, Other from dropdown)
+- Added `MfResolveStep`, `ConflictResolutionStep`, `SuccessState` import components
+- Holdings search filter, bulk delete, duplicate merge endpoints
+- Beta badge in sidebar with modal showing supported features and coming-soon roadmap
+- Collapsible "How to import" guide on Import page (3-column layout)
+- CSV format help tabs: Indian Equity, Indian Mutual Fund (CAS PDF coming soon), Crypto (coming soon)
+- Renamed "Mutual Fund" → "Indian Mutual Fund" in asset class dropdown
+
 ### Scope Note — Asset Classes
-The platform currently supports **Indian equity** as the primary asset class for all features (CSV import, dashboard, portfolio analytics). Crypto, US equity, and other asset classes are referenced in the UI and planned for future phases but are **not yet implemented** in the backend parser or analytics layer. Manual entry can be used as a workaround for non-equity holdings.
+The platform is in **beta** with **12 active asset classes**. **Indian Equity** and **Indian Mutual Funds** are the primary focus with full support: CSV import (Zerodha, Upstox, Kotak Neo), live market prices via yfinance, MF auto-resolution, duplicate detection, and portfolio analytics. Other asset classes (Gold variants, FD, PPF, EPF, NPS, Bonds, Real Estate) support manual entry with cost-basis tracking. US Equity, Cryptocurrency, and Other are hidden from the UI in beta but remain in the database schema for future phases.
