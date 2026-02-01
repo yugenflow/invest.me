@@ -162,6 +162,18 @@ Invest.me/
 - **2026-02-01:** Simplified Manual Entry forms — MF now asks Fund Name + Units + Amount Invested (derives NAV). Gold Physical/Digital ask Total Cost instead of Price/gram. Gold SGB asks Total Cost instead of Issue Price (defaults interest rate 2.5%). Added `required` flag to ColDef with red asterisk indicators in table headers. ReviewTable shows derived per-unit price as secondary info line.
 - **2026-02-01:** Mutual Fund name → Yahoo Finance ticker resolution. New `mf_resolver.py` service: fund name → mfapi.in search → ISIN → Yahoo Finance search → 0P...BO code. Redis-cached (7-day TTL). Auto-resolves on holding creation (`POST /holdings`) and CSV import confirm. New `resolve_mf_symbols` Celery task for batch resolution of unresolved MF holdings. Updated `to_yfinance_ticker()` for better MF code handling.
 - **2026-02-01:** Pre-import MF resolution with manual ISIN fallback. Manual entry for Indian Mutual Fund now has a 3-step flow: Entry → Resolve → Confirm. Fund names are batch-resolved via `POST /import/resolve-mf` before import. Failed resolutions show ISIN input for manual fallback via `POST /import/resolve-isin`. No MF holding gets created without a resolved symbol. Non-MF asset classes remain 2-step. Removed red asterisk indicators from EditableTable. Renamed "Mutual Fund" → "Indian Mutual Fund" in asset class dropdown. Widened Amount Invested column.
+- **2026-02-01:** Beta polish — Added "Indian Mutual Fund" tab to CSV import format help (coming soon banner for CAS PDF import). Added "Beta" badge pill next to logo in sidebar. Clicking badge opens a modal showing currently supported features and coming-soon roadmap. Updated CLAUDE.md with scope & roadmap notes.
+- **2026-02-01:** Added collapsible "How to import" guide on Import page — 3-column layout covering Indian Equity CSV, Mutual Fund manual entry, and other asset classes. Collapsed by default.
+- **2026-02-01:** Scoped manual entry to beta asset classes only — removed US Equity, Cryptocurrency, and Other from the dropdown. Beta supports: Indian Equity, Indian MF, Gold (4 variants), FD, PPF, EPF, NPS, Bonds, Real Estate.
+
+---
+
+## Scope & Roadmap Notes
+
+- **Beta scope:** Indian Equity + Mutual Fund import/tracking are the primary focus. Other asset classes (gold, FD, PPF, EPF, NPS, bonds, real estate, crypto) are manual-entry only with cost basis tracking.
+- **Smart Advisor** will work across all asset classes when built — no need to restrict scope now; design holistically when building.
+- **Import integration priority:** Indian equity CSV → MF CAS PDF → Crypto CSV → Broker API connectors (Zerodha, Upstox, Groww)
+- **Step-by-step approach:** No need to integrate all asset classes at once. Each asset class gets import support as the platform matures.
 
 ---
 

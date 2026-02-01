@@ -22,9 +22,7 @@ const STEPS_MF_CONFLICT = ["Entry", "Resolve", "Conflicts", "Confirm"];
 
 const ASSET_CLASS_OPTIONS = [
   { value: "EQUITY_IN", label: "Indian Equity" },
-  { value: "EQUITY_US", label: "US Equity" },
   { value: "MUTUAL_FUND", label: "Indian Mutual Fund" },
-  { value: "CRYPTO", label: "Cryptocurrency" },
   { value: "GOLD_PHYSICAL", label: "Physical Gold" },
   { value: "GOLD_SGB", label: "Sovereign Gold Bond" },
   { value: "GOLD_ETF", label: "Gold ETF" },
@@ -35,7 +33,6 @@ const ASSET_CLASS_OPTIONS = [
   { value: "NPS", label: "NPS" },
   { value: "REAL_ESTATE", label: "Real Estate" },
   { value: "BOND", label: "Bond" },
-  { value: "OTHER", label: "Other" },
 ];
 
 // Asset classes where user enters total amount instead of per-unit price
